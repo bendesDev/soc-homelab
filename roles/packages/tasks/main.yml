@@ -7,8 +7,8 @@
     update_cache: true
   when: pacman_packages | length > 0
 
-- name: Instalar pacotes do AUR (via yay)
-  ansible.builtin.command: yay -S --needed --noconfirm {{ item }}
+- name: Instalar pacotes do AUR (via paru)
+  ansible.builtin.command: paru -S --needed --noconfirm {{ item }}
   register: aur_result
   changed_when: "'nothing to do' not in aur_result.stdout"
   loop: "{{ aur_packages }}"

@@ -69,3 +69,17 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   carregar o drop-in de roteamento do domínio `.lab`. Adicionado
   `meta: flush_handlers` no fim da role `dns`, pra não depender do resto
   do playbook terminar sem erro.
+- Tentativa inicial de instalar o agente Wazuh via `.deb` + `dpkg`
+  diretamente falhou (Arch não resolve dependências Debian por esse
+  caminho — `libc6`, `lsb-release`, `debconf`, `adduser`, `procps` "não
+  instalados", apesar dos equivalentes Arch existirem). Revertido com
+  `dpkg -P wazuh-agent` e reinstalado corretamente via AUR
+  (`paru -S wazuh-agent`, pacote mantido pela comunidade, mesma versão
+  4.14.7 do manager).
+- Corrigido bug pré-existente na role `packages`: a task de AUR chamava
+  `yay`, que não está instalado nesta máquina (só `paru`). Trocado para
+  `paru -S --needed --noconfirm`.
+- Adicionada role `wazuh_agent`: aponta `/var/ossec/etc/ossec.conf` para
+  `wazuh.lab` e garante o serviço `wazuh-agent` habilitado/rodando.
+  `wazuh-agent` declarado em `aur_packages`. Agente já apareceu como
+  ativo no dashboard. Fase 2 do roadmap do lab concluída.

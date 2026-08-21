@@ -10,7 +10,7 @@ reproduzir o setup em outra máquina.
 
 - `site.yml` — playbook principal, roda todas as roles.
 - `inventory/hosts.ini` — inventário (só `localhost`).
-- `roles/packages` — pacotes instalados via `pacman` e AUR (`yay`).
+- `roles/packages` — pacotes instalados via `pacman` e AUR (`paru`).
   - Lista em `roles/packages/defaults/main.yml`.
 - `roles/dotfiles` — dotfiles versionados em `roles/dotfiles/files/` e
   symlinkados para o `$HOME`.
@@ -23,6 +23,8 @@ reproduzir o setup em outra máquina.
   roteamento de `*.lab` no `systemd-resolved` desta máquina. Registros em
   `roles/dns/defaults/main.yml` (`dns_records`).
 - `roles/soc_lab` — laboratório de estudo SOC (ver Roadmap abaixo).
+- `roles/wazuh_agent` — agente Wazuh nesta própria máquina (instalado via
+  AUR, pacote `wazuh-agent`), apontado para `wazuh.lab`.
 - `CHANGELOG.md` — registro humano do que foi feito e por quê, em ordem
   cronológica.
 
@@ -63,9 +65,10 @@ lab de estudo em casa, inspirado em setups completos de SOC self-hosted.
 Fase atual e próximas fases (cada uma vira uma role nova quando for
 implementada):
 
-1. **Core SIEM (atual)** — Wazuh (manager + indexer + dashboard) via Docker,
+1. ✅ **Core SIEM** — Wazuh (manager + indexer + dashboard) via Docker,
    single-node.
-2. Agente Wazuh nesta própria máquina, pra gerar telemetria real.
+2. ✅ **Agente Wazuh nesta própria máquina** — via AUR (`roles/wazuh_agent`),
+   gerando telemetria real.
 3. Ingestão/parsing adicional (Graylog), dashboards de métricas/KPI
    (Grafana).
 4. SOAR — orquestração de playbooks (Shuffle) e gestão de casos

@@ -6,5 +6,6 @@ pacman_packages:
   - docker-compose
   - dnsmasq
 
-# Pacotes instalados via AUR (precisa de um helper como yay/paru já presente no sistema).
-aur_packages: []
+# Pacotes instalados via AUR (via paru, já presente no sistema).
+aur_packages:
+  - wazuh-agent

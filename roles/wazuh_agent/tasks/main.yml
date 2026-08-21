@@ -1,0 +1,24 @@
+---
+# Instalação em si (AUR: wazuh-agent) fica declarada em
+# roles/packages/defaults/main.yml (aur_packages). Esta role só configura
+# o agente já instalado.
+
+- name: Apontar o agente para o manager
+  # /var/ossec/etc/ossec.conf só é legível como root. Regex genérica: no
+  # ossec.conf padrão só existe um <address> (dentro de <client><server>).
+  ansible.builtin.replace:
+    path: "{{ wazuh_agent_conf_path }}"
+    regexp: '<address>[^<]*</address>'
+    replace: "<address>{{ wazuh_agent_manager }}</address>"
+  become: true
+  notify: Restart wazuh-agent
+
+- name: Habilitar e iniciar o wazuh-agent
+  ansible.builtin.systemd:
+    name: wazuh-agent
+    enabled: true
+    state: started
+  become: true
+
+- name: Aplicar handlers desta role imediatamente
+  ansible.builtin.meta: flush_handlers

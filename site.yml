@@ -9,3 +9,4 @@
     - docker
     - dotfiles
     - soc_lab
+    - wazuh_agent
