@@ -7,3 +7,4 @@ linux_target_ram_size: 2G
 linux_target_cpu_cores: 2
 linux_target_disk_size: 32G
 linux_target_vnc_port: 8008
+linux_target_ssh_port: 2222

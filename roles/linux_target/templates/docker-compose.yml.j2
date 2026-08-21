@@ -15,6 +15,7 @@ services:
       - NET_ADMIN
     ports:
       - "127.0.0.1:{{ linux_target_vnc_port }}:8006"
+      - "127.0.0.1:{{ linux_target_ssh_port }}:22"
     volumes:
       - linux_target_data:/storage
     networks:
