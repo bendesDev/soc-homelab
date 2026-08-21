@@ -4,3 +4,4 @@ storage_partition: /dev/sda1
 storage_mount_point: /mnt/storage
 storage_old_mount_point: /mnt/Archive
 storage_label: storage
+storage_format_force: false

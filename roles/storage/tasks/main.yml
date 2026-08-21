@@ -16,10 +16,14 @@
   become: true
 
 - name: Formatar a partição como ext4
+  # force fica false por padrão: o módulo ignora a checagem de
+  # idempotência (same_fs) quando force=true e reformataria a cada
+  # execução. Só ligar via -e storage_format_force=true na primeira vez
+  # que este dev tiver um filesystem diferente de ext4 (ex.: disco novo).
   community.general.filesystem:
     dev: "{{ storage_partition }}"
     fstype: ext4
-    force: true
+    force: "{{ storage_format_force }}"
     opts: "-L {{ storage_label }}"
   become: true
 
