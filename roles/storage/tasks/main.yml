@@ -1,4 +1,10 @@
 ---
+- name: Desmontar e remover do fstab o ponto de montagem antigo do disco
+  ansible.posix.mount:
+    path: "{{ storage_old_mount_point }}"
+    state: absent
+  become: true
+
 - name: Criar tabela de partições GPT com uma única partição ocupando o disco
   community.general.parted:
     device: "{{ storage_disk }}"
