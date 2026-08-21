@@ -24,3 +24,18 @@ Registro cronológico do que foi feito nesta máquina e por quê.
     single-node (manager + indexer + dashboard) via Docker Compose.
   - Roadmap de fases futuras (Graylog, Grafana, Shuffle/DFIR-IRIS, MISP,
     Kali+Atomic Red Team, Velociraptor) documentado no `README.md`.
+
+## 2026-08-21
+
+- Fix na role `storage`: `force: true` no `community.general.filesystem`
+  ignorava a checagem de idempotência e tentava reformatar a cada
+  execução (falhando por o disco já estar montado). Virou variável
+  `storage_format_force` (default `false`).
+- Fix na role `docker`: `/etc/docker` não existia (pacote do Arch não cria
+  o diretório), quebrando a task que escreve `daemon.json`.
+- Trocada a senha padrão do Wazuh (`admin`/`SecretPassword` e a senha da
+  API `wazuh-wui`) por senhas geradas aleatoriamente, seguindo o processo
+  oficial (docker-compose.yml + hash via `hash.sh` + `internal_users.yml`
+  + `securityadmin.sh`). Senhas não ficam no git — guardadas fora do
+  repositório versionado (`docker-compose.yml` vive em `~/soc-lab`, fora
+  do `infra`).
