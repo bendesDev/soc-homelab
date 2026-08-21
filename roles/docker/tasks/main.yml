@@ -6,6 +6,13 @@
     mode: "0711"
   become: true
 
+- name: Criar diretório de configuração do Docker
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    mode: "0755"
+  become: true
+
 - name: Configurar data-root do Docker
   ansible.builtin.template:
     src: daemon.json.j2
