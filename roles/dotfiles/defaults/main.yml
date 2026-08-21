@@ -3,4 +3,6 @@
 # Exemplo:
 #   - src: bashrc
 #     dest: ~/.bashrc
-dotfiles: []
+dotfiles:
+  - src: config.fish
+    dest: ~/.config/fish/config.fish
