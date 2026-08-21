@@ -60,3 +60,12 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   ganhou `become: true` — o diretório `wazuh_indexer_ssl_certs` é criado
   com `700` pelo container gerador (roda como root), ilegível pro usuário
   normal.
+- Fix na role `dns`: `wazuh.lab` não resolvia mesmo com tudo `ok` no
+  playbook — os handlers de restart (`dnsmasq`, `systemd-resolved`) só
+  rodam no fim do play inteiro, e como a role `soc_lab` falhava logo
+  depois (nos dois problemas acima), o play abortava antes de flushar os
+  handlers: o `dnsmasq` chegou a subir certo (primeira ativação já lê a
+  config nova), mas o `systemd-resolved` nunca foi reiniciado pra
+  carregar o drop-in de roteamento do domínio `.lab`. Adicionado
+  `meta: flush_handlers` no fim da role `dns`, pra não depender do resto
+  do playbook terminar sem erro.

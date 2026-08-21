@@ -47,3 +47,9 @@
     mode: "0644"
   become: true
   notify: Restart systemd-resolved
+
+- name: Aplicar handlers desta role imediatamente
+  # Sem isso, os restarts só rodariam no fim do playbook inteiro — se uma
+  # role depois desta falhar (ex.: soc_lab), dnsmasq/systemd-resolved
+  # ficam com a config nova escrita em disco mas nunca recarregada.
+  ansible.builtin.meta: flush_handlers
