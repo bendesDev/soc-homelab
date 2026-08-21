@@ -1,0 +1,24 @@
+---
+- name: Clonar o repositório oficial wazuh-docker
+  ansible.builtin.git:
+    repo: "{{ wazuh_docker_repo }}"
+    dest: "{{ soc_lab_dir }}/wazuh-docker"
+    version: "{{ wazuh_version_tag }}"
+
+- name: Verificar se os certificados do indexer já foram gerados
+  ansible.builtin.stat:
+    path: "{{ soc_lab_dir }}/wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem"
+  register: wazuh_root_ca
+
+- name: Gerar certificados do indexer
+  ansible.builtin.command: docker compose -f generate-indexer-certs.yml run --rm generator
+  args:
+    chdir: "{{ soc_lab_dir }}/wazuh-docker/single-node"
+  become: true
+  when: not wazuh_root_ca.stat.exists
+
+- name: Subir o stack do Wazuh (single-node)
+  community.docker.docker_compose_v2:
+    project_src: "{{ soc_lab_dir }}/wazuh-docker/single-node"
+    state: present
+  become: true

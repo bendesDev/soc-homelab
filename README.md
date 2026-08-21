@@ -15,6 +15,11 @@ reproduzir o setup em outra máquina.
 - `roles/dotfiles` — dotfiles versionados em `roles/dotfiles/files/` e
   symlinkados para o `$HOME`.
   - Mapeamento em `roles/dotfiles/defaults/main.yml`.
+- `roles/storage` — dedica o HD adicional (`/dev/sda`) como ext4 montado em
+  `/mnt/storage`, para uso de alta capacidade (VMs, dados de containers,
+  etc.).
+- `roles/docker` — Docker com `data-root` em `/mnt/storage/docker`.
+- `roles/soc_lab` — laboratório de estudo SOC (ver Roadmap abaixo).
 - `CHANGELOG.md` — registro humano do que foi feito e por quê, em ordem
   cronológica.
 
@@ -47,3 +52,26 @@ playbook roda tudo.)
    mudança de forma idempotente (rodar de novo não deve reportar `changed`).
 3. Registre uma linha no `CHANGELOG.md` com a data e o motivo da mudança.
 4. Commit.
+
+## Roadmap: laboratório SOC (`roles/soc_lab`)
+
+Gabriel começa numa vaga de analista SOC em setembro/2026 e está montando um
+lab de estudo em casa, inspirado em setups completos de SOC self-hosted.
+Fase atual e próximas fases (cada uma vira uma role nova quando for
+implementada):
+
+1. **Core SIEM (atual)** — Wazuh (manager + indexer + dashboard) via Docker,
+   single-node.
+2. Agente Wazuh nesta própria máquina, pra gerar telemetria real.
+3. Ingestão/parsing adicional (Graylog), dashboards de métricas/KPI
+   (Grafana).
+4. SOAR — orquestração de playbooks (Shuffle) e gestão de casos
+   (DFIR-IRIS), com roteamento por severidade (ex.: webhook no Discord para
+   alertas de baixa severidade).
+5. Threat intel — enriquecimento de IOCs (GeoIP/ASN, VirusTotal) e MISP.
+6. Simulação de adversário e teste de detecção — Kali Linux + Atomic Red
+   Team, endpoints Windows (Sysmon) e Linux (auditd) como alvo.
+7. DFIR — Velociraptor.
+
+Cada fase é opcional e incremental; a ideia é ir crescendo o lab conforme
+o estudo avançar, não montar tudo de uma vez.

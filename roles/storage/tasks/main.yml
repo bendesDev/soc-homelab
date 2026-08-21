@@ -1,0 +1,26 @@
+---
+- name: Criar tabela de partições GPT com uma única partição ocupando o disco
+  community.general.parted:
+    device: "{{ storage_disk }}"
+    label: gpt
+    number: 1
+    state: present
+    part_start: 0%
+    part_end: 100%
+  become: true
+
+- name: Formatar a partição como ext4
+  community.general.filesystem:
+    dev: "{{ storage_partition }}"
+    fstype: ext4
+    force: true
+    opts: "-L {{ storage_label }}"
+  become: true
+
+- name: Montar o disco de armazenamento
+  ansible.posix.mount:
+    path: "{{ storage_mount_point }}"
+    src: "{{ storage_partition }}"
+    fstype: ext4
+    state: mounted
+  become: true

@@ -1,0 +1,5 @@
+---
+storage_disk: /dev/sda
+storage_partition: /dev/sda1
+storage_mount_point: /mnt/storage
+storage_label: storage

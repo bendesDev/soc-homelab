@@ -1,0 +1,29 @@
+---
+- name: Criar diretório de dados do Docker no disco de armazenamento
+  ansible.builtin.file:
+    path: "{{ docker_data_root }}"
+    state: directory
+    mode: "0711"
+  become: true
+
+- name: Configurar data-root do Docker
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+  become: true
+  notify: Restart docker
+
+- name: Adicionar usuário ao grupo docker
+  ansible.builtin.user:
+    name: "{{ docker_user }}"
+    groups: docker
+    append: true
+  become: true
+
+- name: Habilitar e iniciar o serviço docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+  become: true

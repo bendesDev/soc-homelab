@@ -4,4 +4,7 @@
   become: false
   roles:
     - packages
+    - storage
+    - docker
     - dotfiles
+    - soc_lab
