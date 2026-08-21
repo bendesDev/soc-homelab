@@ -56,3 +56,7 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   clone inicial, arquivos do `wazuh-docker` (senhas, `wazuh.yml`) passam
   a ser editados manualmente, e o módulo `git` recusava (ou, com force,
   apagaria) essas mudanças a cada re-run do playbook.
+- Fix na role `soc_lab`: task de verificar os certificados do indexer
+  ganhou `become: true` — o diretório `wazuh_indexer_ssl_certs` é criado
+  com `700` pelo container gerador (roda como root), ilegível pro usuário
+  normal.

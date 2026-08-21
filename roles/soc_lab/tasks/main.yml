@@ -12,8 +12,11 @@
     update: false
 
 - name: Verificar se os certificados do indexer já foram gerados
+  # become: true — o gerador roda como root dentro do container e cria
+  # esse diretório com 700 (bind mount), ilegível pro usuário normal.
   ansible.builtin.stat:
     path: "{{ soc_lab_dir }}/wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem"
+  become: true
   register: wazuh_root_ca
 
 - name: Gerar certificados do indexer
