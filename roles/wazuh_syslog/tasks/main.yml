@@ -1,0 +1,26 @@
+---
+# ossec.conf do manager vive num volume Docker nomeado (wazuh_etc), não
+# num bind-mount no host — por isso a config é feita via docker exec, não
+# via template/replace direto num arquivo do host.
+- name: Configurar listener de syslog no manager (idempotente)
+  community.docker.docker_container_exec:
+    container: "{{ wazuh_manager_container }}"
+    argv:
+      - python3
+      - "-c"
+      - |
+        content = open('/var/ossec/etc/ossec.conf').read()
+        if 'connection>syslog' not in content:
+            block = '\n  <remote>\n    <connection>syslog</connection>\n    <port>{{ wazuh_syslog_port }}</port>\n    <protocol>{{ wazuh_syslog_protocol }}</protocol>\n    <allowed-ips>{{ wazuh_syslog_allowed_ips }}</allowed-ips>\n  </remote>\n</ossec_config>'
+            content = content.replace('</ossec_config>', block, 1)
+            open('/var/ossec/etc/ossec.conf', 'w').write(content)
+            print('added')
+        else:
+            print('already present')
+  become: true
+  register: wazuh_syslog_result
+  changed_when: "'added' in wazuh_syslog_result.stdout"
+  notify: Restart wazuh manager
+
+- name: Aplicar handlers desta role imediatamente
+  ansible.builtin.meta: flush_handlers

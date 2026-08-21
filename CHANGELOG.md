@@ -83,3 +83,23 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   `wazuh.lab` e garante o serviço `wazuh-agent` habilitado/rodando.
   `wazuh-agent` declarado em `aur_packages`. Agente já apareceu como
   ativo no dashboard. Fase 2 do roadmap do lab concluída.
+- Adicionada role `wazuh_syslog`: listener de syslog (UDP 514) no
+  manager, pra ingerir logs do FortiWiFi 40C do Gabriel (Wazuh já traz
+  decoders/regras nativas pra FortiGate/FortiOS). `ossec.conf` do manager
+  fica num volume Docker nomeado (`wazuh_etc`), não em bind-mount no
+  host — a role edita via `docker exec` + Python (idempotente),
+  diferente do padrão `template` usado nas outras roles.
+  - Testado ponta a ponta com pacote UDP simulado: decoder
+    `fortigate-firewall-v6` reconheceu o log, regra `81606` ("Fortigate:
+    Login failed") disparou, alerta indexado.
+  - `allowed-ips` restrito a `192.168.0.0/24` — motivo real de um teste
+    inicial ter falhado: pacote enviado via `127.0.0.1` chega ao manager
+    como `172.18.0.1` (NAT do Docker pro localhost), fora da faixa
+    permitida. Não é bug — confirma que o filtro de IP está funcionando;
+    o FortiWiFi de verdade manda da rede local e passa normalmente.
+  - Falta o passo manual no próprio FortiWiFi (`config log syslogd
+    setting`, ver `README.md`) — não automatizável a partir daqui.
+- Pré-baixadas as imagens `grafana/grafana`, `graylog/graylog:6.1` e
+  `mongo:6`, adiantando a fase 3 do roadmap sem ainda decidir a
+  arquitetura (aguardando decisão: Grafana direto no indexer do Wazuh
+  primeiro, Graylog só quando houver fonte de log adicional pra ele).

@@ -1,0 +1,7 @@
+---
+wazuh_manager_container: single-node-wazuh.manager-1
+wazuh_syslog_port: 514
+wazuh_syslog_protocol: udp
+# Restrito à rede local — ajuste pro /32 do dispositivo (ex.: o FortiWiFi)
+# se quiser restringir mais.
+wazuh_syslog_allowed_ips: 192.168.0.0/24

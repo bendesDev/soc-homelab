@@ -1,0 +1,8 @@
+---
+- name: Restart wazuh manager
+  community.docker.docker_container_exec:
+    container: "{{ wazuh_manager_container }}"
+    argv:
+      - /var/ossec/bin/wazuh-control
+      - restart
+  become: true

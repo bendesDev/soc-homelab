@@ -25,6 +25,10 @@ reproduzir o setup em outra máquina.
 - `roles/soc_lab` — laboratório de estudo SOC (ver Roadmap abaixo).
 - `roles/wazuh_agent` — agente Wazuh nesta própria máquina (instalado via
   AUR, pacote `wazuh-agent`), apontado para `wazuh.lab`.
+- `roles/wazuh_syslog` — listener de syslog (UDP 514) no manager, pra
+  ingerir logs de dispositivos externos (ver FortiWiFi abaixo). Config
+  fica num volume Docker nomeado, não em arquivo do host — a role edita
+  via `docker exec`.
 - `CHANGELOG.md` — registro humano do que foi feito e por quê, em ordem
   cronológica.
 
@@ -125,3 +129,41 @@ controle do `git` da role `soc_lab` (`update: false`) — editar à vontade.
    `password` manualmente e `docker compose restart wazuh.dashboard`. Foi
    exatamente esse passo que faltou da primeira vez e quebrou o acesso
    (erro 401 em `/api/check-api`).
+
+## Ingerir logs do FortiWiFi 40C (`roles/wazuh_syslog`)
+
+O manager já tem decoders/regras nativas pra FortiGate/FortiOS (79 regras
+em `0391-fortigate_rules.xml`, cobrindo tráfego, IPS/UTM, VPN, login
+admin) e um listener de syslog UDP 514 já testado ponta a ponta
+(pacote simulado → decoder `fortigate-firewall-v6` → regra disparada →
+alerta no `alerts.json`).
+
+Falta só apontar o FortiWiFi pra cá — isso é feito no próprio
+equipamento, não dá pra automatizar por aqui. No CLI do FortiOS
+(`Console`/SSH, usuário admin):
+
+```
+config log syslogd setting
+    set status enable
+    set server "192.168.0.132"
+    set port 514
+    set facility local7
+end
+```
+
+Se os logs chegarem com aparência estranha (formato CEF em vez de
+`date=... time=...`), rode também `set format traditional` (ou
+`default`, depende da versão do FortiOS) dentro do mesmo bloco.
+
+Depois de configurar, verificar no dashboard do Wazuh
+(`https://wazuh.lab` → *Threat Intelligence* / *Discover*, filtrar por
+`rule.groups: fortigate` ou `location: 192.168.0.132`) ou via linha de
+comando:
+
+```
+docker exec single-node-wazuh.manager-1 tail -f /var/ossec/logs/alerts/alerts.json | grep fortigate
+```
+
+`wazuh_syslog_allowed_ips` (`roles/wazuh_syslog/defaults/main.yml`) está
+restrito a `192.168.0.0/24` — ajuste pro `/32` do FortiWiFi se quiser
+travar mais.
