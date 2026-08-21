@@ -1,0 +1,31 @@
+# Gerenciado pelo Ansible (roles/linux_target) — não editar à mão.
+services:
+  linux-target:
+    image: qemux/qemu
+    container_name: {{ linux_target_container_name }}
+    environment:
+      BOOT: "{{ linux_target_boot }}"
+      RAM_SIZE: "{{ linux_target_ram_size }}"
+      CPU_CORES: "{{ linux_target_cpu_cores }}"
+      DISK_SIZE: "{{ linux_target_disk_size }}"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "127.0.0.1:{{ linux_target_vnc_port }}:8006"
+    volumes:
+      - linux_target_data:/storage
+    networks:
+      - pentest
+    restart: always
+    stop_grace_period: 2m
+
+networks:
+  pentest:
+    external: true
+    name: {{ pentest_network_name }}
+
+volumes:
+  linux_target_data:

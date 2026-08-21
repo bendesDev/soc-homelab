@@ -1,0 +1,18 @@
+---
+- name: Criar diretório do alvo Linux
+  ansible.builtin.file:
+    path: "{{ linux_target_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Escrever docker-compose.yml do alvo Linux
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ linux_target_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Subir o alvo Linux
+  community.docker.docker_compose_v2:
+    project_src: "{{ linux_target_dir }}"
+    state: present
+  become: true

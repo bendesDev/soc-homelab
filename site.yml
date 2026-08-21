@@ -12,3 +12,7 @@
     - wazuh_syslog
     - wazuh_agent
     - grafana
+    - pentest_network
+    - kali
+    - windows_vm
+    - linux_target

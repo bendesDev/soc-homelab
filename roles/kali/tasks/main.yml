@@ -1,0 +1,18 @@
+---
+- name: Criar diretório do Kali
+  ansible.builtin.file:
+    path: "{{ kali_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Escrever docker-compose.yml do Kali
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ kali_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Subir o Kali
+  community.docker.docker_compose_v2:
+    project_src: "{{ kali_dir }}"
+    state: present
+  become: true

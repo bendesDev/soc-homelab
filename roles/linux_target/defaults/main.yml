@@ -1,0 +1,9 @@
+---
+linux_target_dir: /home/gabriel/soc-lab/linux-target
+linux_target_container_name: linux-target
+pentest_network_name: pentest_lab
+linux_target_boot: debian
+linux_target_ram_size: 2G
+linux_target_cpu_cores: 2
+linux_target_disk_size: 32G
+linux_target_vnc_port: 8008

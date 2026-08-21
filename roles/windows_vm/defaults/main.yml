@@ -1,0 +1,19 @@
+---
+windows_vm_base_dir: /home/gabriel/soc-lab/windows
+pentest_network_name: pentest_lab
+
+windows_instances:
+  - name: win11-a
+    version: "11"
+    ram_size: 4G
+    cpu_cores: 2
+    disk_size: 64G
+    vnc_port: 8006
+    rdp_port: 3389
+  - name: win11-b
+    version: "11"
+    ram_size: 4G
+    cpu_cores: 2
+    disk_size: 64G
+    vnc_port: 8007
+    rdp_port: 3390

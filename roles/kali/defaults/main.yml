@@ -1,0 +1,4 @@
+---
+kali_dir: /home/gabriel/soc-lab/kali
+kali_container_name: kali
+pentest_network_name: pentest_lab

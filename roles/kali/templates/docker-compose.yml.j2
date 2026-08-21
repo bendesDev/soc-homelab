@@ -1,0 +1,22 @@
+# Gerenciado pelo Ansible (roles/kali) — não editar à mão.
+services:
+  kali:
+    image: kalilinux/kali-rolling
+    container_name: {{ kali_container_name }}
+    restart: unless-stopped
+    command: sleep infinity
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - kali_data:/root
+    networks:
+      - pentest
+
+networks:
+  pentest:
+    external: true
+    name: {{ pentest_network_name }}
+
+volumes:
+  kali_data:

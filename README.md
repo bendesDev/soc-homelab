@@ -31,6 +31,12 @@ reproduzir o setup em outra máquina.
   via `docker exec`.
 - `roles/grafana` — dashboards conectados direto no indexer (OpenSearch)
   do Wazuh, container na mesma rede Docker do stack (`single-node_default`).
+- `roles/pentest_network` — rede Docker isolada (`pentest_lab`,
+  `10.10.20.0/24`) pro lab de pentest (ver seção abaixo).
+- `roles/kali` — container `kalilinux/kali-rolling`, CLI-only, sem GUI.
+- `roles/windows_vm` — VMs Windows 11 via QEMU/KVM (`dockurr/windows`),
+  parametrizada por `windows_instances` (2 instâncias por padrão).
+- `roles/linux_target` — VM Debian leve (`qemux/qemu`) como alvo Linux.
 - `CHANGELOG.md` — registro humano do que foi feito e por quê, em ordem
   cronológica.
 
@@ -90,14 +96,18 @@ implementada):
    single-node.
 2. ✅ **Agente Wazuh nesta própria máquina** — via AUR (`roles/wazuh_agent`),
    gerando telemetria real.
-3. Ingestão/parsing adicional (Graylog), dashboards de métricas/KPI
-   (Grafana).
+3. 🟡 **Dashboards de métricas/KPI** (`roles/grafana`) — feito. Ingestão
+   adicional via Graylog fica pra quando houver fonte de log que precise
+   de parsing extra (FortiWiFi já entra direto no Wazuh, ver acima).
 4. SOAR — orquestração de playbooks (Shuffle) e gestão de casos
    (DFIR-IRIS), com roteamento por severidade (ex.: webhook no Discord para
    alertas de baixa severidade).
 5. Threat intel — enriquecimento de IOCs (GeoIP/ASN, VirusTotal) e MISP.
-6. Simulação de adversário e teste de detecção — Kali Linux + Atomic Red
-   Team, endpoints Windows (Sysmon) e Linux (auditd) como alvo.
+6. 🟡 **Simulação de adversário e teste de detecção** — infraestrutura
+   no ar (`roles/pentest_network`, `kali`, `windows_vm`, `linux_target`):
+   Kali (atacante) + Windows 11 × 2 + VM Linux (alvos). Falta instalar
+   Sysmon/auditd + agente Wazuh dentro de cada VM (passo manual, ver
+   seção "Lab de pentest" acima) e rodar o Atomic Red Team em si.
 7. DFIR — Velociraptor.
 
 Cada fase é opcional e incremental; a ideia é ir crescendo o lab conforme
@@ -210,3 +220,44 @@ Pegadinhas encontradas:
 - Grafana conecta no indexer via rede Docker (`wazuh.indexer:9200`,
   mesma rede do stack do Wazuh) — não depende do DNS `.lab` de dentro do
   container.
+
+## Lab de pentest (`roles/pentest_network`, `kali`, `windows_vm`, `linux_target`)
+
+Fase 6 do roadmap. Kali = atacante, Windows 11 × 2 e a VM Linux = alvos
+(vão rodar Atomic Red Team + Sysmon/auditd + agente Wazuh). Tudo numa
+rede Docker isolada (`pentest_lab`, `10.10.20.0/24`) — **não** exposta
+pro resto da rede doméstica (essa máquina só tem Wi-Fi, `macvlan` não
+funcionaria de forma confiável, e isolar é mais seguro de qualquer jeito
+pra alvos deliberadamente vulneráveis). O manager do Wazuh está
+conectado nessa rede também, então os agentes apontam pra
+`wazuh.manager` (DNS interno do Docker), sem depender do domínio `.lab`.
+
+Acesso:
+- Kali: `docker exec -it kali bash` (sem ferramentas pré-instaladas de
+  propósito — instalar via `apt install <pacote>` conforme a
+  necessidade).
+- `win11-a`: `http://localhost:8006` (VNC web, só em loopback) e RDP na
+  porta `3389` depois de instalado.
+- `win11-b`: `http://localhost:8007` (VNC) / RDP na porta `3390`.
+- `linux-target`: `http://localhost:8008` (VNC).
+
+**Passos manuais depois do primeiro boot** (não dá pra automatizar 100%
+nesta primeira passada — documentado aqui, não esquecido):
+1. Windows: completar a instalação pela tela VNC (Windows já vem
+   descompactando o ISO sozinho, primeira vez demora). Depois, instalar
+   Sysmon e o agente Wazuh (MSI oficial, `msiexec /i wazuh-agent... 
+   WAZUH_MANAGER='wazuh.manager'`).
+2. Linux target: primeiro boot do Debian, depois `apt install auditd` e
+   instalar o agente Wazuh apontando pro mesmo `WAZUH_MANAGER=wazuh.manager`
+   (mesmo pacote/processo do `roles/wazuh_agent`, mas dentro da VM).
+
+Por que a VM Linux não é só um container Debian comum: `auditd` depende
+do subsistema de auditoria do kernel via netlink, que é *system-wide* —
+num container ele enxergaria o kernel do host, não teria visibilidade
+isolada e realista do "alvo". Por isso é uma VM de verdade (QEMU/KVM),
+igual ao Windows, só que bem mais leve (`RAM_SIZE: 2G`).
+
+Orçamento de recursos (22GB RAM total): Windows 11 × 2 @ 4GB = 8GB,
+Linux target @ 2GB, Kali/Grafana/Wazuh ~6GB — folga de uns 6GB mesmo com
+tudo rodando ao mesmo tempo. Disco: `/mnt/storage` tem 424GB livres,
+VMs usam thin-provisioning (só ocupam o que realmente é escrito).

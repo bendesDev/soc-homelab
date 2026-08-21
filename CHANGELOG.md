@@ -121,3 +121,24 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   - Aplicado manualmente via `docker compose` (sem sudo, grupo `docker`
     já bastou) — não passou pelo `ansible-playbook site.yml -K` ainda,
     então falta confirmar idempotência na próxima rodada completa.
+- Início do "shape" da fase 6 (simulação de adversário): Kali (atacante)
+  + Windows 11 × 2 + VM Linux (alvos, vão rodar Atomic Red Team). Roles
+  novas: `pentest_network`, `kali`, `windows_vm`, `linux_target`.
+  - Decisão de rede: esta máquina só tem Wi-Fi, `macvlan` não é confiável
+    nesse cenário (roteador filtra MAC spoofing) — criada rede Docker
+    isolada `pentest_lab` (`10.10.20.0/24`), manager do Wazuh conectado
+    nela também. Isola os alvos vulneráveis do resto da rede doméstica
+    (bônus de segurança, não só contorno de limitação).
+  - Decisão técnica: VM Linux alvo é uma VM de verdade (QEMU/KVM via
+    `qemux/qemu`, `RAM_SIZE: 2G`), não um container Debian comum —
+    `auditd` depende do subsistema de auditoria do kernel via netlink
+    (system-wide), não teria visibilidade isolada/realista num container
+    compartilhando o kernel do host.
+  - Windows 11 × 2 via `dockurr/windows` (QEMU/KVM, instalação
+    automatizada do ISO), `RAM_SIZE: 4G` cada, VNC web só em loopback
+    (portas 8006/8007), RDP publicado (3389/3390).
+  - Aplicado manualmente via `docker compose` (rede + 4 serviços,
+    ~8GB RAM em uso no total, dentro da folga esperada). Ainda falta
+    passar pelo `ansible-playbook site.yml -K` pra confirmar
+    idempotência, e os passos manuais dentro de cada VM (Sysmon/auditd +
+    agente Wazuh) documentados no `README.md`.

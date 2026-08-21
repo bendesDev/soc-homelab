@@ -1,0 +1,27 @@
+---
+- name: Criar diretórios das VMs Windows
+  ansible.builtin.file:
+    path: "{{ windows_vm_base_dir }}/{{ item.name }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ windows_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Escrever docker-compose.yml de cada VM Windows
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ windows_vm_base_dir }}/{{ item.name }}/docker-compose.yml"
+    mode: "0644"
+  loop: "{{ windows_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Subir as VMs Windows
+  community.docker.docker_compose_v2:
+    project_src: "{{ windows_vm_base_dir }}/{{ item.name }}"
+    state: present
+  loop: "{{ windows_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
