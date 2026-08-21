@@ -98,3 +98,27 @@ máquina.
   novo. O jeito definitivo de evitar isso é reservar esse IP pro
   endereço MAC desta máquina no painel do roteador (fora do alcance do
   Ansible).
+
+## Trocar senhas do Wazuh (`~/soc-lab/wazuh-docker`)
+
+Não é automatizado (é uma ação deliberada, não algo que o playbook deva
+reaplicar sozinho). Depois do clone inicial, esses arquivos ficam fora do
+controle do `git` da role `soc_lab` (`update: false`) — editar à vontade.
+
+1. `docker-compose.yml`: trocar `INDEXER_PASSWORD` (usuário `admin`,
+   indexer) e/ou `API_PASSWORD` (usuário `wazuh-wui`, API do manager) nos
+   dois serviços onde aparecem.
+2. Senha do indexer (`admin`): gerar hash com
+   `docker run --rm wazuh/wazuh-indexer:<tag> bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p '<senha>'`,
+   colar em `config/wazuh_indexer/internal_users.yml` (campo `hash` do
+   usuário).
+3. `docker compose down && docker compose up -d`.
+4. Aplicar a config de segurança no indexer: dentro do container
+   (`docker exec -it <indexer> bash`), rodar o `securityadmin.sh` (ver
+   `CHANGELOG.md` de 2026-08-21 pro comando completo).
+5. **Não esquecer**: `config/wazuh_dashboard/wazuh.yml` guarda a senha da
+   API que o dashboard usa pra falar com o manager — é um arquivo
+   estático, não se atualiza sozinho com a env var. Editar o campo
+   `password` manualmente e `docker compose restart wazuh.dashboard`. Foi
+   exatamente esse passo que faltou da primeira vez e quebrou o acesso
+   (erro 401 em `/api/check-api`).

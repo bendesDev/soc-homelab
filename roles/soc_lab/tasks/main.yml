@@ -1,9 +1,15 @@
 ---
-- name: Clonar o repositório oficial wazuh-docker
+- name: Clonar o repositório oficial wazuh-docker (só na primeira vez)
+  # update: false — depois do clone inicial, docker-compose.yml,
+  # internal_users.yml e wazuh.yml passam a ser editados manualmente
+  # (senhas, tuning). Sem isso, todo re-run tentaria sincronizar com o
+  # remoto e falharia com "local modifications exist" (ou, com force,
+  # apagaria as senhas trocadas).
   ansible.builtin.git:
     repo: "{{ wazuh_docker_repo }}"
     dest: "{{ soc_lab_dir }}/wazuh-docker"
     version: "{{ wazuh_version_tag }}"
+    update: false
 
 - name: Verificar se os certificados do indexer já foram gerados
   ansible.builtin.stat:

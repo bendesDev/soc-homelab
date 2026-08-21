@@ -45,3 +45,14 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   (`/etc/systemd/resolved.conf.d/lab.conf`) pra esta máquina rotear
   `*.lab` pro `dnsmasq` local sem afetar a resolução normal de DNS. IP
   local vem de DHCP — risco de mudar documentado no `README.md`.
+- Corrigido acesso ao dashboard do Wazuh (erro 401 em `/api/check-api`):
+  a troca de senha da API (`wazuh-wui`) tinha atualizado a env var e o
+  manager (que resincroniza a cada boot), mas não o `wazuh.yml` do
+  dashboard — arquivo estático, só lido uma vez na criação, guarda a
+  senha usada pra falar com a API do manager. Atualizado
+  `config/wazuh_dashboard/wazuh.yml` e reiniciado o container do
+  dashboard.
+- Fix na role `soc_lab`: `git clone` ganhou `update: false` — depois do
+  clone inicial, arquivos do `wazuh-docker` (senhas, `wazuh.yml`) passam
+  a ser editados manualmente, e o módulo `git` recusava (ou, com force,
+  apagaria) essas mudanças a cada re-run do playbook.
