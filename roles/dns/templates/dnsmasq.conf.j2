@@ -1,0 +1,14 @@
+# Gerenciado pelo Ansible (roles/dns) — não editar à mão.
+{% for addr in dns_listen_addresses %}
+listen-address={{ addr }}
+{% endfor %}
+bind-interfaces
+
+domain={{ dns_domain }}
+local=/{{ dns_domain }}/
+addn-hosts=/etc/dnsmasq.d/lab-hosts
+
+no-resolv
+{% for server in dns_upstream_servers %}
+server={{ server }}
+{% endfor %}

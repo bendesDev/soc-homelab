@@ -19,6 +19,9 @@ reproduzir o setup em outra máquina.
   `/mnt/storage`, para uso de alta capacidade (VMs, dados de containers,
   etc.).
 - `roles/docker` — Docker com `data-root` em `/mnt/storage/docker`.
+- `roles/dns` — `dnsmasq` servindo o domínio `.lab` pra rede local, mais
+  roteamento de `*.lab` no `systemd-resolved` desta máquina. Registros em
+  `roles/dns/defaults/main.yml` (`dns_records`).
 - `roles/soc_lab` — laboratório de estudo SOC (ver Roadmap abaixo).
 - `CHANGELOG.md` — registro humano do que foi feito e por quê, em ordem
   cronológica.
@@ -75,3 +78,23 @@ implementada):
 
 Cada fase é opcional e incremental; a ideia é ir crescendo o lab conforme
 o estudo avançar, não montar tudo de uma vez.
+
+## DNS local (`roles/dns`)
+
+Os serviços do lab ficam acessíveis por nome (`wazuh.lab`, e o que for
+adicionado depois) em vez de IP/porta, via `dnsmasq` rodando nesta
+máquina.
+
+- **Nesta máquina**: já funciona automaticamente (roteamento configurado
+  no `systemd-resolved`).
+- **Outros dispositivos da rede** (celular, notebook, etc.): configure o
+  DNS manualmente pra `192.168.0.132` (IP desta máquina na rede local) —
+  não dá pra automatizar isso a partir daqui, cada dispositivo tem sua
+  própria tela de configuração de rede.
+- **Atenção**: esse IP vem de DHCP e pode mudar se o Wi-Fi reconectar ou o
+  roteador reiniciar. Se `wazuh.lab` parar de resolver, confira o IP atual
+  (`ip -4 addr show wlan0`), atualize `dns_lan_ip` em
+  `roles/dns/defaults/main.yml` e rode `ansible-playbook site.yml -K` de
+  novo. O jeito definitivo de evitar isso é reservar esse IP pro
+  endereço MAC desta máquina no painel do roteador (fora do alcance do
+  Ansible).

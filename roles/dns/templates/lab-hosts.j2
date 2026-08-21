@@ -1,0 +1,4 @@
+# Gerenciado pelo Ansible (roles/dns) — não editar à mão.
+{% for record in dns_records %}
+{{ record.ip }} {{ record.name }}
+{% endfor %}

@@ -1,0 +1,17 @@
+---
+dns_domain: lab
+# IP desta máquina na rede local (Wi-Fi, wlan0). Vem de DHCP — se mudar,
+# atualize aqui e rode o playbook de novo (ver nota no README).
+dns_lan_ip: 192.168.0.132
+dns_listen_addresses:
+  - 127.0.0.1
+  - "{{ dns_lan_ip }}"
+dns_upstream_servers:
+  - 1.1.1.1
+  - 9.9.9.9
+
+# Registros do domínio .lab. Adicione um item aqui pra cada novo serviço
+# do laboratório (Grafana, Graylog, etc.).
+dns_records:
+  - name: "wazuh.{{ dns_domain }}"
+    ip: "{{ dns_lan_ip }}"

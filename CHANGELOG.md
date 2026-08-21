@@ -39,3 +39,9 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   + `securityadmin.sh`). Senhas não ficam no git — guardadas fora do
   repositório versionado (`docker-compose.yml` vive em `~/soc-lab`, fora
   do `infra`).
+- Adicionada role `dns`: `dnsmasq` (declarado em `pacman_packages`)
+  servindo o domínio local `.lab` pra rede inteira (`wazuh.lab` →
+  `192.168.0.132`), mais um drop-in no `systemd-resolved`
+  (`/etc/systemd/resolved.conf.d/lab.conf`) pra esta máquina rotear
+  `*.lab` pro `dnsmasq` local sem afetar a resolução normal de DNS. IP
+  local vem de DHCP — risco de mudar documentado no `README.md`.
