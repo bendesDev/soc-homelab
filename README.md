@@ -29,8 +29,25 @@ reproduzir o setup em outra máquina.
   ingerir logs de dispositivos externos (ver FortiWiFi abaixo). Config
   fica num volume Docker nomeado, não em arquivo do host — a role edita
   via `docker exec`.
+- `roles/grafana` — dashboards conectados direto no indexer (OpenSearch)
+  do Wazuh, container na mesma rede Docker do stack (`single-node_default`).
 - `CHANGELOG.md` — registro humano do que foi feito e por quê, em ordem
   cronológica.
+
+## Segredos (senhas) por role
+
+Toda role que precisa de uma senha (ex.: `grafana`, que precisa da senha
+do indexer do Wazuh pra configurar o datasource) segue este padrão:
+
+- `roles/<nome>/vars/main.yml.example` — **versionado**, mostra a
+  estrutura esperada com placeholder.
+- `roles/<nome>/vars/main.yml` — **gitignored** (`roles/*/vars/main.yml`
+  no `.gitignore`), com as senhas reais. `vars/main.yml` carrega
+  automático no Ansible (prioridade maior que `defaults/`), sem precisar
+  de `vars_files` explícito.
+
+Pra reproduzir isso numa outra máquina: copiar o `.example`, tirar o
+sufixo, preencher com as senhas reais.
 
 Novas roles podem ser adicionadas conforme surgirem outras categorias de
 mudança (serviços systemd, configs do sistema, etc.) — seguir o mesmo padrão
@@ -167,3 +184,29 @@ docker exec single-node-wazuh.manager-1 tail -f /var/ossec/logs/alerts/alerts.js
 `wazuh_syslog_allowed_ips` (`roles/wazuh_syslog/defaults/main.yml`) está
 restrito a `192.168.0.0/24` — ajuste pro `/32` do FortiWiFi se quiser
 travar mais.
+
+## Grafana (`roles/grafana`)
+
+Dashboards em `http://localhost:3000` (login `admin`, senha em
+`roles/grafana/vars/main.yml`, campo `grafana_admin_password`).
+Datasource "Wazuh - OpenSearch" já provisionado automaticamente, lendo
+direto do índice `wazuh-alerts-*` do indexer — nenhum dado próprio, é só
+uma janela pros mesmos alertas do dashboard do Wazuh, em formato de
+dashboard/KPI.
+
+Pegadinhas encontradas:
+- **`GF_INSTALL_PLUGINS` está deprecado** nessa versão do Grafana (warning
+  no log), mas ainda funciona pra instalar o
+  `grafana-opensearch-datasource`. Se parar de funcionar numa atualização
+  futura, trocar para `GF_PLUGINS_PREINSTALL_SYNC`.
+- **`jsonData.version` do datasource precisa ser a versão real do
+  OpenSearch** (ex.: `"2.19.5"`), não um wildcard tipo `"2.11+"` — senão
+  o health-check falha com "No version set".
+- **O botão "Save & Test" do datasource falha com "Index not found:
+  wazuh-alerts-\*"** mesmo com tudo funcionando — é o health-check do
+  plugin não lidando bem com índice por wildcard/data (`wazuh-alerts-4.x-
+  AAAA.MM.DD`). Confirmado que a query de verdade funciona (contagem de
+  documentos bate) apesar do aviso vermelho. Não é um problema real.
+- Grafana conecta no indexer via rede Docker (`wazuh.indexer:9200`,
+  mesma rede do stack do Wazuh) — não depende do DNS `.lab` de dentro do
+  container.

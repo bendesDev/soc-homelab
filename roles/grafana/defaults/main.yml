@@ -1,0 +1,14 @@
+---
+grafana_dir: /home/gabriel/soc-lab/grafana
+grafana_port: 3000
+grafana_container_name: grafana
+# Rede Docker do stack do Wazuh (roles/soc_lab) — conecta o Grafana nela
+# direto, em vez de depender do DNS .lab de dentro do container.
+wazuh_docker_network: single-node_default
+wazuh_indexer_url: "https://wazuh.indexer:9200"
+wazuh_indexer_username: admin
+# Versão do OpenSearch rodando no indexer (não do Wazuh em si) — o plugin
+# grafana-opensearch-datasource exige um número de versão real aqui
+# (não aceita algo tipo "2.11+"). Confirme com:
+#   docker exec <indexer> curl -sk -u admin:<senha> https://localhost:9200
+wazuh_indexer_version: "2.19.5"

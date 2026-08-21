@@ -103,3 +103,21 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   `mongo:6`, adiantando a fase 3 do roadmap sem ainda decidir a
   arquitetura (aguardando decisão: Grafana direto no indexer do Wazuh
   primeiro, Graylog só quando houver fonte de log adicional pra ele).
+- Decidido: Grafana primeiro (dado real disponível, zero sudo), Graylog
+  fica pra quando o FortiWiFi estiver mandando log de verdade. Adicionada
+  role `grafana`: container na rede Docker do stack do Wazuh
+  (`single-node_default`), datasource "Wazuh - OpenSearch" provisionado
+  automático contra o indexer.
+  - Introduzido o padrão de segredos por role: `roles/<nome>/vars/main.yml`
+    (gitignored) + `.example` versionado. `roles/grafana/vars/main.yml`
+    guarda `wazuh_indexer_password` (reaproveitada da senha já trocada) e
+    `grafana_admin_password` (gerada nova).
+  - Dois bugs de configuração corrigidos ao testar: `jsonData.version`
+    tinha que ser a versão real do OpenSearch (`2.19.5`), não `"2.11+"`
+    ("No version set"); e o health-check do plugin falha com "Index not
+    found" pra índice por wildcard mesmo funcionando (confirmado via
+    query direta: contagem de documentos bate, 353). Detalhes no
+    `README.md`.
+  - Aplicado manualmente via `docker compose` (sem sudo, grupo `docker`
+    já bastou) — não passou pelo `ansible-playbook site.yml -K` ainda,
+    então falta confirmar idempotência na próxima rodada completa.

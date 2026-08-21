@@ -1,0 +1,18 @@
+# Gerenciado pelo Ansible (roles/grafana) — não editar à mão.
+apiVersion: 1
+datasources:
+  - name: Wazuh - OpenSearch
+    type: grafana-opensearch-datasource
+    access: proxy
+    url: "{{ wazuh_indexer_url }}"
+    isDefault: true
+    basicAuth: true
+    basicAuthUser: "{{ wazuh_indexer_username }}"
+    secureJsonData:
+      basicAuthPassword: "{{ wazuh_indexer_password }}"
+    jsonData:
+      database: "wazuh-alerts-*"
+      version: "{{ wazuh_indexer_version }}"
+      flavor: opensearch
+      timeField: "timestamp"
+      tlsSkipVerify: true

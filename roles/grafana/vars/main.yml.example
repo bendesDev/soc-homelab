@@ -1,0 +1,6 @@
+---
+# Copie este arquivo para vars/main.yml (gitignored) e preencha com as
+# senhas reais. vars/main.yml carrega automaticamente pro Ansible, tem
+# prioridade maior que defaults/ — não precisa de include extra.
+wazuh_indexer_password: "TROQUE_AQUI"
+grafana_admin_password: "TROQUE_AQUI"

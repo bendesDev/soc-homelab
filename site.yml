@@ -11,3 +11,4 @@
     - soc_lab
     - wazuh_syslog
     - wazuh_agent
+    - grafana

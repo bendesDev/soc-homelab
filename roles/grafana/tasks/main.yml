@@ -1,0 +1,27 @@
+---
+- name: Criar diretórios do Grafana
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ grafana_dir }}"
+    - "{{ grafana_dir }}/provisioning/datasources"
+
+- name: Escrever docker-compose.yml do Grafana
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ grafana_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Provisionar datasource do indexer do Wazuh
+  ansible.builtin.template:
+    src: datasource.yml.j2
+    dest: "{{ grafana_dir }}/provisioning/datasources/wazuh.yml"
+    mode: "0600"
+
+- name: Subir o Grafana
+  community.docker.docker_compose_v2:
+    project_src: "{{ grafana_dir }}"
+    state: present
+  become: true

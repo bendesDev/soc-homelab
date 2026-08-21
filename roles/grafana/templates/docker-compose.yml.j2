@@ -1,0 +1,25 @@
+# Gerenciado pelo Ansible (roles/grafana) — não editar à mão.
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: {{ grafana_container_name }}
+    restart: always
+    ports:
+      - "{{ grafana_port }}:3000"
+    environment:
+      - GF_INSTALL_PLUGINS=grafana-opensearch-datasource
+      - GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password }}
+      - GF_SERVER_DOMAIN=grafana.lab
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning
+    networks:
+      - wazuh
+
+networks:
+  wazuh:
+    external: true
+    name: {{ wazuh_docker_network }}
+
+volumes:
+  grafana_data:
