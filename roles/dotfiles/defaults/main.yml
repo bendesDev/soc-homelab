@@ -1,0 +1,6 @@
+---
+# Cada entrada vira um symlink: roles/dotfiles/files/<src> -> <dest>
+# Exemplo:
+#   - src: bashrc
+#     dest: ~/.bashrc
+dotfiles: []

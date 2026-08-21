@@ -1,0 +1,7 @@
+---
+- name: Configura esta máquina
+  hosts: local
+  become: false
+  roles:
+    - packages
+    - dotfiles

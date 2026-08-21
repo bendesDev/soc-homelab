@@ -1,0 +1,7 @@
+---
+# Pacotes instalados via pacman (repositórios oficiais).
+pacman_packages:
+  - ansible
+
+# Pacotes instalados via AUR (precisa de um helper como yay/paru já presente no sistema).
+aur_packages: []

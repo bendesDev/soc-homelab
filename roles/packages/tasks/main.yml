@@ -1,0 +1,15 @@
+---
+- name: Instalar pacotes oficiais (pacman)
+  become: true
+  community.general.pacman:
+    name: "{{ pacman_packages }}"
+    state: present
+    update_cache: true
+  when: pacman_packages | length > 0
+
+- name: Instalar pacotes do AUR (via yay)
+  ansible.builtin.command: yay -S --needed --noconfirm {{ item }}
+  register: aur_result
+  changed_when: "'nothing to do' not in aur_result.stdout"
+  loop: "{{ aur_packages }}"
+  when: aur_packages | length > 0
