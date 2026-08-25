@@ -1,0 +1,11 @@
+---
+dashboard_dir: /home/gabriel/soc-lab/dashboard
+dashboard_container_name: homepage
+dashboard_port: 3001
+
+# Rede Docker do stack de mídia (roles/media) — conecta o dashboard nela
+# pra conseguir puxar os widgets (fila do Sonarr/Radarr/qBittorrent etc.)
+# via nome de container. Não precisa entrar em nenhuma outra rede: o
+# status (bolinha verde/vermelha) de qualquer container, mesmo fora dessa
+# rede, vem do socket do Docker, não da rede.
+dashboard_media_network: media

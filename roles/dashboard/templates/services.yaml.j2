@@ -1,0 +1,101 @@
+# Gerenciado pelo Ansible (roles/dashboard) — não editar à mão.
+# Login/senha nas descrições é de propósito (uso pessoal, rede de
+# casa) — ver decisão em CHANGELOG.md.
+---
+- Mídia:
+    - Jellyfin:
+        icon: jellyfin.png
+        href: http://{{ dns_lan_ip }}:{{ jellyfin_port }}/
+        description: "admin / {{ media_admin_password }}"
+        server: my-docker
+        container: jellyfin
+    - Jellyseerr:
+        icon: jellyseerr.png
+        href: http://{{ dns_lan_ip }}:{{ jellyseerr_port }}/
+        description: "admin / {{ media_admin_password }} (login via Jellyfin)"
+        server: my-docker
+        container: jellyseerr
+    - Sonarr:
+        icon: sonarr.png
+        href: http://{{ dns_lan_ip }}:{{ sonarr_port }}/
+        description: "admin / {{ media_admin_password }}"
+        server: my-docker
+        container: sonarr
+        widget:
+          type: sonarr
+          url: http://sonarr:8989
+          key: "{{ sonarr_api_key }}"
+    - Radarr:
+        icon: radarr.png
+        href: http://{{ dns_lan_ip }}:{{ radarr_port }}/
+        description: "admin / {{ media_admin_password }}"
+        server: my-docker
+        container: radarr
+        widget:
+          type: radarr
+          url: http://radarr:7878
+          key: "{{ radarr_api_key }}"
+    - Prowlarr:
+        icon: prowlarr.png
+        href: http://{{ dns_lan_ip }}:{{ prowlarr_port }}/
+        description: "admin / {{ media_admin_password }}"
+        server: my-docker
+        container: prowlarr
+        widget:
+          type: prowlarr
+          url: http://prowlarr:9696
+          key: "{{ prowlarr_api_key }}"
+    - qBittorrent:
+        icon: qbittorrent.png
+        href: http://{{ dns_lan_ip }}:{{ qbittorrent_port }}/
+        description: "admin / {{ media_admin_password }}"
+        server: my-docker
+        container: qbittorrent
+        widget:
+          type: qbittorrent
+          url: http://qbittorrent:{{ qbittorrent_port }}
+          username: admin
+          password: "{{ media_admin_password }}"
+    - Bazarr:
+        icon: bazarr.png
+        href: http://{{ dns_lan_ip }}:{{ bazarr_port }}/
+        description: "config pendente (ver CHANGELOG.md 2026-08-24)"
+        server: my-docker
+        container: bazarr
+    - FlareSolverr:
+        icon: flaresolverr.png
+        href: http://{{ dns_lan_ip }}:{{ flaresolverr_port }}/
+        description: "sem UI própria — proxy anti-Cloudflare do Prowlarr"
+        server: my-docker
+        container: flaresolverr
+
+- SOC Lab:
+    - Wazuh Dashboard:
+        icon: wazuh.png
+        href: https://{{ dns_lan_ip }}/
+        description: "admin / {{ wazuh_indexer_password | default('ver docs/OPERATIONS.md') }}"
+        server: my-docker
+        container: single-node-wazuh.dashboard-1
+    - Grafana:
+        icon: grafana.png
+        href: http://{{ dns_lan_ip }}:{{ grafana_port }}/
+        description: "admin / {{ grafana_admin_password | default('ver roles/grafana/vars/main.yml') }}"
+        server: my-docker
+        container: {{ grafana_container_name }}
+    - Kali (atacante):
+        icon: kali-linux.png
+        description: "sem UI web — acesso: docker exec -it kali bash"
+        server: my-docker
+        container: kali
+    - Windows 11 A (alvo):
+        icon: windows.png
+        description: "VM libvirt/KVM — VNC: vncviewer 127.0.0.1:5910 (só nesta máquina) · RDP: 10.10.20.10:3389"
+    - Windows 11 B (alvo):
+        icon: windows.png
+        description: "VM libvirt/KVM — VNC: vncviewer 127.0.0.1:5911 (só nesta máquina) · RDP: 10.10.20.11:3389"
+    - Linux Target (alvo):
+        icon: debian.png
+        href: http://localhost:8008/
+        description: "VNC e SSH (2222) só nesta máquina (loopback)"
+        server: my-docker
+        container: linux-target

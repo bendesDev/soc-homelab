@@ -1,0 +1,34 @@
+# Gerenciado pelo Ansible (roles/dashboard) — não editar à mão.
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: {{ dashboard_container_name }}
+    restart: unless-stopped
+    environment:
+      # Next.js valida o header Host contra essa lista — sem isso, tudo
+      # que não for o hostname interno do container é rejeitado com
+      # "Host validation failed" (mesmo localhost:PORTA de fora).
+      - HOMEPAGE_ALLOWED_HOSTS=localhost:{{ dashboard_port }},127.0.0.1:{{ dashboard_port }},{{ dns_lan_ip | default('192.168.0.132') }}:{{ dashboard_port }}
+    ports:
+      # A imagem escuta fixo na 3000 por dentro (HOMEPAGE_LISTEN_PORT não
+      # é respeitada nessa versão) — só remapeamos a porta do host.
+      - "{{ dashboard_port }}:3000"
+    volumes:
+      - {{ dashboard_dir }}/settings.yaml:/app/config/settings.yaml
+      - {{ dashboard_dir }}/services.yaml:/app/config/services.yaml
+      - {{ dashboard_dir }}/docker.yaml:/app/config/docker.yaml
+      - {{ dashboard_dir }}/bookmarks.yaml:/app/config/bookmarks.yaml
+      - {{ dashboard_dir }}/widgets.yaml:/app/config/widgets.yaml
+      # Só leitura: status (rodando/parado) de qualquer container, sem
+      # precisar estar na mesma rede Docker.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Só leitura: widget de uso de disco (mesmo caminho por fora e por
+      # dentro do container, pro widget bater com o path real).
+      - /mnt/storage:/mnt/storage:ro
+    networks:
+      - media
+
+networks:
+  media:
+    external: true
+    name: {{ dashboard_media_network }}

@@ -1,0 +1,50 @@
+---
+# Lê a API key de cada app direto do config.xml gerado por ele, em vez de
+# depender de um fact setado pela role `media` (`--tags dashboard`
+# sozinho não roda as tasks da `media`, então esses facts não existiriam
+# nesse cenário — ler do disco aqui deixa esta role independente).
+- name: Ler API key gerada por cada app Servarr
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -oP '<ApiKey>\K[^<]+' {{ media_config_dir }}/{{ item }}/config.xml
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: _dashboard_api_key_reads
+  loop: [sonarr, radarr, prowlarr]
+
+- name: Guardar API keys em variáveis
+  ansible.builtin.set_fact:
+    sonarr_api_key: "{{ (_dashboard_api_key_reads.results | selectattr('item', 'equalto', 'sonarr') | first).stdout }}"
+    radarr_api_key: "{{ (_dashboard_api_key_reads.results | selectattr('item', 'equalto', 'radarr') | first).stdout }}"
+    prowlarr_api_key: "{{ (_dashboard_api_key_reads.results | selectattr('item', 'equalto', 'prowlarr') | first).stdout }}"
+
+- name: Criar diretório de config do dashboard
+  ansible.builtin.file:
+    path: "{{ dashboard_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Escrever configs do Homepage
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ dashboard_dir }}/{{ item }}"
+    mode: "0644"
+  loop:
+    - settings.yaml
+    - services.yaml
+    - docker.yaml
+    - bookmarks.yaml
+    - widgets.yaml
+
+- name: Escrever docker-compose.yml do dashboard
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ dashboard_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Subir o dashboard
+  community.docker.docker_compose_v2:
+    project_src: "{{ dashboard_dir }}"
+    state: present
+  become: true
