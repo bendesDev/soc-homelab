@@ -3,16 +3,20 @@
   hosts: local
   become: false
   roles:
-    - packages
-    - dns
-    - storage
-    - docker
-    - dotfiles
-    - soc_lab
-    - wazuh_syslog
-    - wazuh_agent
-    - grafana
-    - pentest_network
-    - kali
-    - windows_vm
-    - linux_target
+    - { role: packages, tags: packages }
+    - { role: dns, tags: dns }
+    - { role: network, tags: network }
+    - { role: storage, tags: storage }
+    - { role: docker, tags: docker }
+    - { role: dotfiles, tags: dotfiles }
+    - { role: media, tags: media }
+    - { role: soc_lab, tags: soc_lab }
+    - { role: wazuh_syslog, tags: wazuh_syslog }
+    - { role: wazuh_agent, tags: wazuh_agent }
+    - { role: grafana, tags: grafana }
+    - { role: pentest_network, tags: pentest_network }
+    - { role: kali, tags: kali }
+    - { role: libvirt, tags: libvirt }
+    - { role: windows_vm, tags: windows_vm }
+    - { role: linux_target, tags: linux_target }
+    - { role: dashboard, tags: dashboard }

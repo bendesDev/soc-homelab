@@ -142,3 +142,214 @@ Registro cronológico do que foi feito nesta máquina e por quê.
     passar pelo `ansible-playbook site.yml -K` pra confirmar
     idempotência, e os passos manuais dentro de cada VM (Sysmon/auditd +
     agente Wazuh) documentados no `README.md`.
+
+## 2026-08-24
+
+- Adicionado `ani-cli` (AUR) à role `packages`.
+- Nova role `media`: stack de mídia (Jellyfin + Prowlarr + Sonarr + Radarr
+  + qBittorrent + Bazarr + Jellyseerr) via `docker compose`, dados em
+  `/mnt/storage/media-stack`. Sem VPN na frente do qBittorrent (decisão
+  consciente do gabriel, tráfego sai direto).
+  - Aplicado via `ansible-playbook site.yml -K`. Diretório raiz precisou
+    de `owner`/`group` explícitos nas tasks porque `/mnt/storage` é
+    `root:root` (mount point criado pela role `storage`) — sem isso o
+    usuário `gabriel` não conseguia criar nada lá dentro.
+  - Descoberto durante o setup: a imagem `linuxserver/qbittorrent` usa
+    `/downloads` como save path padrão, que não bate com o volume
+    montado (`/data/downloads`) — corrigido manualmente via API
+    (`app/setPreferences`). Ainda não voltou pra dentro da role — próxima
+    vez que o container for recriado do zero, esse ajuste (e a senha
+    permanente do WebUI) precisa ser refeito manualmente.
+  - Login/contas configuradas manualmente via API de cada serviço
+    (`admin`/`251718` em qBittorrent, Sonarr, Radarr, Prowlarr e
+    Jellyfin), Prowlarr conectado ao Sonarr/Radarr, Jellyfin com
+    bibliotecas "Filmes" (`/data/movies`) e "Séries" (`/data/tv`).
+    Nenhuma dessas contas/integrações está na role Ansible — só existem
+    no estado runtime dos containers, então não sobrevivem a um volume
+    novo. Fica como TODO se algum dia isso for reproduzido do zero.
+  - Bazarr e Jellyseerr não deram pra terminar via API (settings do
+    Bazarr não persiste via API sem entender o formato exato; Jellyseerr
+    rejeita o admin do Jellyfin com `NO_ADMIN_USER` mesmo com
+    `IsAdministrator: true` — não investigado a fundo). Ficaram como
+    passos manuais na UI.
+- `site.yml`: roles convertidas pra `{ role: ..., tags: ... }`, uma tag
+  por role (mesmo nome da role). Permite `ansible-playbook site.yml -K
+  --tags <role>` pra aplicar só uma parte, sem rodar o resto (ex.: sem
+  isso, qualquer mudança pequena reaplicava até o stack do Wazuh/Kali/VMs
+  inteiro).
+- Adicionado `flaresolverr` à role `media` (container extra no mesmo
+  `docker-compose.yml`) e conectado ao Prowlarr como Indexer Proxy
+  (`Settings > Indexer Proxies`, tag `flaresolverr`).
+  - **Indexer Proxy no Prowlarr só se aplica a indexadores com a mesma
+    tag** — campo `tags` vazio no proxy não significa "aplica a tudo".
+    Criada a tag `flaresolverr` via API e associada ao proxy; qualquer
+    indexador que precise do FlareSolverr precisa da mesma tag nele.
+  - Pegadinha feia: o campo "Host" do Indexer Proxy tem que ser
+    `http://flaresolverr:8191/` (nome do container, resolvido de dentro
+    do container do Prowlarr) — `localhost:8191` (o que se vê no
+    navegador) dá "connection refused" porque ali "localhost" é o
+    próprio Prowlarr, não o FlareSolverr. Aconteceu duas vezes (uma
+    porque um `Settings > General > Proxy` do próprio Prowlarr também
+    tinha sido setado erroneamente pra `localhost:8191`).
+  - Testado de ponta a ponta contra `nowsecure.nl` (site padrão de teste
+    de bypass de Cloudflare) — resolve desafio real, não só responde
+    "ready".
+- Nova role `dashboard`: [Homepage](https://gethomepage.dev) agregando
+  tudo (mídia + SOC lab) num painel só, `docker-compose` na rede `media`
+  (só essa rede — status de container vem do socket do Docker, não
+  precisa estar na mesma rede pra isso). Login/senha de cada serviço nas
+  descrições dos cards, de propósito (uso pessoal, ver decisão no
+  histórico da conversa) — ciente que isso fica visível pra qualquer um
+  na rede Wi-Fi de casa que acessar o painel.
+  - Segredos (senhas dos serviços de mídia + API keys do Sonarr/Radarr/
+    Prowlarr) em `roles/dashboard/vars/main.yml` (gitignored, `.example`
+    versionado), seguindo o padrão já usado pela role `grafana`. As
+    senhas do Grafana e do Wazuh não foram duplicadas — o template só
+    referencia `grafana_admin_password`/`wazuh_indexer_password`
+    (definidas em `roles/grafana/vars/main.yml`), que já ficam
+    disponíveis no escopo da play porque a role `grafana` roda antes da
+    `dashboard` no `site.yml`.
+  - Três bugs até funcionar de verdade:
+    1. `HOMEPAGE_LISTEN_PORT` não é respeitada nessa imagem — ela sempre
+       escuta 3000 por dentro. Corrigido mapeando `3001:3000` em vez de
+       trocar a porta interna.
+    2. Next.js valida o header `Host` da requisição contra uma allowlist
+       — sem `HOMEPAGE_ALLOWED_HOSTS`, até `localhost:3001` vindo de fora
+       do container toma "Host validation failed".
+    3. Os `href` dos cards estavam todos como `localhost:PORTA` — funciona
+       abrindo do navegador desta máquina (onde "localhost" = ela mesma),
+       mas não de outro dispositivo na rede (celular, etc.), onde
+       "localhost" aponta pro próprio dispositivo. Trocado pro IP da LAN
+       (`dns_lan_ip`, `192.168.0.132`) em todos os serviços expostos ao
+       resto da rede. Os 3 de VNC (Windows A/B, Linux target) continuam
+       em `localhost` de propósito — essas portas são loopback-only
+       (bind `127.0.0.1`), só acessíveis mesmo a partir desta máquina.
+  - Idioma: pedido pra deixar em pt-BR, mas essa imagem trava
+    `defaultLocale`/`locales` em `["en"]` direto no build
+    (`next-i18next.config.js`) — `settings.yaml` não tem como contornar
+    isso, apesar de existirem arquivos de tradução pt-BR empacotados
+    (parecem vestígio de uma feature de i18n ainda não habilitada nessa
+    versão). Decisão: deixar em inglês (menus/telas do app), já que os
+    nomes de grupo/serviço/descrição (o que mais se vê no dia a dia) são
+    texto nosso, não tradução do app.
+- `roles/network` (nova): fixa o IP desta máquina (`192.168.0.132`) via
+  `nmcli` (a conexão Wi-Fi `Lucca5G` já existente, só os campos `ipv4.*`
+  — nada de recriar a conexão, risco alto numa Wi-Fi ativa). Decisão
+  consciente do gabriel: fixar no cliente em vez de reservar por MAC no
+  roteador, ciente do risco de conflito de IP se o DHCP do roteador
+  também distribuir esse endereço um dia.
+- **`roles/media/tasks/configure.yml` (novo)**: tudo que tinha sido feito
+  manualmente via curl numa sessão de troubleshooting (contas do
+  qBittorrent/Sonarr/Radarr/Prowlarr/Jellyfin, integrações entre eles,
+  bibliotecas do Jellyfin, proxy do FlareSolverr) virou task idempotente
+  de Ansible, usando `ansible.builtin.uri`. Motivo: gabriel vai migrar
+  esse setup pra um Proxmox depois, sem se preocupar com backup dos
+  dados — só precisa que `ansible-playbook site.yml -K` reproduza tudo
+  sozinho numa VM nova.
+  - API keys do Sonarr/Radarr/Prowlarr não são segredo fixo — são
+    geradas por cada app no primeiro boot e lidas do `config.xml` de
+    cada um via `grep` (fact `set_fact`), não hardcoded.
+  - Testado de verdade: rodado contra o ambiente já configurado (o
+    melhor teste de idempotência possível) várias vezes até sair 100%
+    limpo, sem `changed` nem erro. Alguns detalhes que só apareceram
+    testando de verdade (não dava pra saber só lendo a doc da API):
+    Sonarr/Radarr/Prowlarr retornam **202**, não 200, ao salvar
+    `config/host` com o método de autenticação mudando; o login do
+    qBittorrent retorna **204**, não 200; e o payload de `config/host`
+    do Sonarr/Radarr/Prowlarr precisa de *todos* os campos do resource
+    (incluindo os que parecem irrelevantes, tipo `logSizeLimit` e
+    `backupInterval`) — mandar só um subconjunto derruba a API com
+    `NullReferenceException` (500) em vez de validar e rejeitar (400).
+  - `roles/dashboard` também foi ajustado: em vez de duplicar a senha e
+    as API keys em `vars/main.yml` próprio, agora lê a senha de
+    `media_admin_password` (definida em `roles/media/vars/main.yml`) e
+    as API keys direto do `config.xml` de cada app — do jeito que
+    estava antes, `--tags dashboard` sozinho quebraria se `--tags media`
+    não tivesse rodado antes na mesma invocação (facts não sobrevivem
+    entre invocações separadas do `ansible-playbook`).
+  - Bazarr continua de fora (ver decisão de 2026-08-24 mais acima) —
+    ainda não tem uma forma confiável de automatizar.
+- **Jellyseerr resolvido** — o `NO_ADMIN_USER` que travava o setup desde
+  2026-08-24 não tinha nada a ver com o Jellyfin: lendo o código-fonte
+  compilado dentro do próprio container (`/app/dist/routes/auth.js`),
+  achei que `POST /api/v1/auth/jellyfin` exige um campo `serverType: 2`
+  (Jellyfin) no corpo — sem ele, cai direto nesse erro genérico. Formas
+  não documentadas descobertas na mesma investigação:
+  - Se `settings.jellyfin.ip` já estiver preenchido (rerun depois de
+    setup parcial), mandar `hostname` de novo quebra com "Jellyfin
+    hostname already configured" — o corpo do request muda dependendo
+    do que já foi salvo.
+  - `initialized: true` não é automático depois do login — precisa de
+    um `POST /api/v1/settings/initialize` autenticado à parte.
+  - Sincronizar bibliotecas (`?sync=true`) sempre zera `enabled` de
+    todas (só fica true se vier no mesmo request via `?enable=`) — não
+    dá pra só "atualizar a lista" sem reafirmar quais ficam ligadas.
+  - Sonarr exige o campo `enableSeasonFolders` que não aparece em nenhum
+    outro app da Servarr; sem ele, 400.
+  - Tudo isso virou task no `configure.yml`: setup inicial, sincronização
+    de bibliotecas, e conexão com Sonarr/Radarr (perfil de qualidade
+    HD-1080p, descoberto dinamicamente via `/settings/{radarr,sonarr}/test`
+    em vez de hardcoded — o ID desse perfil não é garantido ser o mesmo
+    em toda instalação nova, só o nome é estável).
+- Achado pelo gabriel: um filme já importado pelo Radarr (arquivo no
+  disco certinho) não aparecia no Jellyfin — o Jellyfin não descobre
+  arquivo novo sozinho sem scan manual/agendado ou monitoramento em
+  tempo real (nenhum dos dois configurado). Corrigido de duas formas:
+  1. Scan manual disparado uma vez pra resolver o backlog na hora
+     (`POST /Library/Refresh`).
+  2. **Conexão Sonarr/Radarr -> Jellyfin** (tipo "Emby/Jellyfin" nas
+     notificações de cada um, `updateLibrary: true`) adicionada ao
+     `configure.yml` — a partir de agora, todo import novo já dispara um
+     refresh direcionado no Jellyfin sozinho, sem precisar de scan
+     manual ou agendado. Usa uma API key do Jellyfin gerada e guardada
+     via `/Auth/Keys?App=Ansible` (idempotente: só cria se ainda não
+     existir uma chamada "Ansible").
+- **Bazarr resolvido** — a settings API que "não persistia" (ver decisão
+  de mais cedo hoje) na verdade funcionava, só não do jeito que eu tinha
+  tentado. Lendo `/app/bazarr/bin/bazarr/api/system/settings.py` de
+  dentro do próprio container achei a causa real: o endpoint só lê
+  `request.form` (nunca JSON, por isso as tentativas em JSON eram
+  ignoradas em silêncio) e as chaves têm que ser literalmente
+  `settings-<seção>-<campo>` (ex.: `settings-sonarr-apikey`), com
+  booleano como string minúscula `"true"`/`"false"` — `"True"` (Python-
+  style, meu primeiro palpite de manhã) é rejeitado.
+  - Formalizado em `configure.yml`: idiomas (pt-BR + inglês) habilitados,
+    perfil "pt-BR + EN" criado, conectado ao Sonarr/Radarr como perfil
+    padrão de série/filme.
+  - Pegadinha só reproduzida testando via Ansible (não apareceu nos
+    testes manuais de manhã, por causa da ordem diferente das chamadas):
+    o item de cada idioma no perfil precisa do campo `audio_only_include`
+    — sem ele, `list_missing_subtitles_movies()` quebra com `KeyError`
+    (500) **só se o Sonarr/Radarr já estiverem conectados** no momento
+    de salvar o perfil (senão essa função nem roda). Mais um motivo pra
+    sempre testar contra o ambiente real, não só validar sintaxe.
+  - Provedor de legenda: só `napiprojekt` habilitado por enquanto (não
+    precisa de conta, mas fraco pra lançamentos novos/pt-BR). Gabriel vai
+    criar conta grátis no opensubtitles.com e passar as credenciais pra
+    eu conectar — anotado como próximo passo em
+    `roles/media/tasks/configure.yml`.
+- **opensubtitles.com conectado.** Pegadinha: a API deles rejeita login
+  com e-mail, exige o *username* da conta especificamente (confirmado
+  testando direto contra `api.opensubtitles.com/api/v1/login`, fora do
+  Bazarr, pra isolar se o problema era credencial ou o Bazarr — foi
+  credencial). Credenciais em `roles/media/vars/main.yml` (gitignored,
+  `bazarr_opensubtitlescom_username`/`_password`), task nova em
+  `configure.yml`. Testado de verdade: legenda em inglês da "Avatar
+  Aang" baixada automaticamente pelo Bazarr assim que conectado. pt-BR
+  não achou pra essa release específica ainda (lançamento
+  recente/nicho, não é erro — o Bazarr continua tentando sozinho).
+  - Outra pegadinha só vista testando: depois de um erro de credencial
+    (`ConfigurationError`), o Bazarr **throttla o provedor por 12h**
+    (fica em memória, não é sobre tempo real passado) — reiniciar o
+    container limpa esse estado. Sem isso, mesmo corrigindo a credencial
+    certa, as buscas seguintes pareciam "não fazer nada" porque nem
+    chegavam a tentar de novo.
+- Mesmo problema do filme "sumido" (ver entrada de hoje sobre o Jellyfin
+  não escanear sozinho) aconteceu de novo com a legenda que o Bazarr
+  baixou — e dessa vez não tem como resolver com uma notificação tipo a
+  do Sonarr/Radarr, porque o Bazarr não tem esse recurso de avisar o
+  Jellyfin. Solução definitiva: `EnableRealtimeMonitor: true` nas duas
+  bibliotecas do Jellyfin (monitoramento de sistema de arquivos, pega
+  qualquer mudança sozinho — import novo, legenda nova, o que for).
+  Aplicado nas bibliotecas já existentes e também no `configure.yml` pra
+  bibliotecas criadas do zero numa migração futura.
