@@ -1,0 +1,7 @@
+---
+# IP fixado direto no NetworkManager (não é reserva de DHCP no roteador
+# — ver decisão e o risco de conflito de IP no histórico/README).
+network_connection_name: Lucca5G
+network_static_ip: 192.168.0.132/24
+network_gateway: 192.168.0.1
+network_dns: 192.168.0.1

@@ -1,0 +1,26 @@
+---
+# nmcli, não o módulo community.general.nmcli: a conexão já existe (Wi-Fi
+# com WPA-PSK) e só queremos tocar nos campos ipv4.* — o módulo de alto
+# nível espera a definição completa da conexão (SSID, segurança, etc.) e
+# reescrever isso à toa é arriscado numa conexão Wi-Fi ativa.
+- name: Checar método IPv4 atual da conexão
+  ansible.builtin.command: nmcli -g ipv4.method connection show {{ network_connection_name }}
+  become: true
+  register: current_ipv4_method
+  changed_when: false
+
+- name: Fixar IP estático na conexão
+  ansible.builtin.command: >
+    nmcli connection modify {{ network_connection_name }}
+    ipv4.method manual
+    ipv4.addresses {{ network_static_ip }}
+    ipv4.gateway {{ network_gateway }}
+    ipv4.dns {{ network_dns }}
+  become: true
+  when: current_ipv4_method.stdout != 'manual'
+  register: nmcli_modify
+
+- name: Reaplicar a conexão pra entrar em vigor
+  ansible.builtin.command: nmcli connection up {{ network_connection_name }}
+  become: true
+  when: nmcli_modify is changed
