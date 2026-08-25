@@ -1,0 +1,25 @@
+---
+# Raiz de tudo do stack de mídia no disco de armazenamento.
+media_dir: /mnt/storage/media-stack
+media_config_dir: "{{ media_dir }}/config"
+media_data_dir: "{{ media_dir }}/data"
+
+# Downloads e biblioteca ficam sob o mesmo diretório (media_data_dir) pra
+# Sonarr/Radarr conseguirem usar hardlink em vez de copiar o arquivo ao
+# importar (mesmo filesystem = mesmo st_dev, mesmo em containers
+# diferentes, já que bind mount não muda isso).
+media_puid: 1000
+media_pgid: 1000
+media_timezone: America/Sao_Paulo
+
+media_docker_network: media
+
+jellyfin_port: 8096
+qbittorrent_port: 8080
+qbittorrent_torrenting_port: 6881
+sonarr_port: 8989
+radarr_port: 7878
+prowlarr_port: 9696
+bazarr_port: 6767
+jellyseerr_port: 5055
+flaresolverr_port: 8191

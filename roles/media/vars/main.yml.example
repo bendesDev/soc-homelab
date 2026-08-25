@@ -1,0 +1,9 @@
+---
+# Copiar para main.yml (gitignored) e preencher com os valores reais.
+# Ver docs/OPERATIONS.md, seção "Segredos (senhas) por role".
+media_admin_password: "CHANGE_ME"
+# Conta grátis em opensubtitles.com — usar o USERNAME da conta, não o
+# e-mail (a API deles rejeita e-mail explicitamente, só aceita o
+# username escolhido/gerado no cadastro).
+bazarr_opensubtitlescom_username: "CHANGE_ME"
+bazarr_opensubtitlescom_password: "CHANGE_ME"

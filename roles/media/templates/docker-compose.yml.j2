@@ -1,0 +1,128 @@
+# Gerenciado pelo Ansible (roles/media) — não editar à mão.
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    user: "{{ media_puid }}:{{ media_pgid }}"
+    ports:
+      - "{{ jellyfin_port }}:8096"
+    volumes:
+      - {{ media_config_dir }}/jellyfin:/config
+      - {{ media_data_dir }}/library:/data
+    networks:
+      - media
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    environment:
+      - PUID={{ media_puid }}
+      - PGID={{ media_pgid }}
+      - TZ={{ media_timezone }}
+      - WEBUI_PORT={{ qbittorrent_port }}
+    ports:
+      - "{{ qbittorrent_port }}:{{ qbittorrent_port }}"
+      - "{{ qbittorrent_torrenting_port }}:{{ qbittorrent_torrenting_port }}"
+      - "{{ qbittorrent_torrenting_port }}:{{ qbittorrent_torrenting_port }}/udp"
+    volumes:
+      - {{ media_config_dir }}/qbittorrent:/config
+      - {{ media_data_dir }}/downloads:/data/downloads
+    networks:
+      - media
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID={{ media_puid }}
+      - PGID={{ media_pgid }}
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ prowlarr_port }}:9696"
+    volumes:
+      - {{ media_config_dir }}/prowlarr:/config
+    networks:
+      - media
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    environment:
+      - PUID={{ media_puid }}
+      - PGID={{ media_pgid }}
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ sonarr_port }}:8989"
+    volumes:
+      - {{ media_config_dir }}/sonarr:/config
+      - {{ media_data_dir }}/downloads:/data/downloads
+      - {{ media_data_dir }}/library/tv:/data/library/tv
+    networks:
+      - media
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    environment:
+      - PUID={{ media_puid }}
+      - PGID={{ media_pgid }}
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ radarr_port }}:7878"
+    volumes:
+      - {{ media_config_dir }}/radarr:/config
+      - {{ media_data_dir }}/downloads:/data/downloads
+      - {{ media_data_dir }}/library/movies:/data/library/movies
+    networks:
+      - media
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    environment:
+      - PUID={{ media_puid }}
+      - PGID={{ media_pgid }}
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ bazarr_port }}:6767"
+    volumes:
+      - {{ media_config_dir }}/bazarr:/config
+      - {{ media_data_dir }}/library/movies:/data/library/movies
+      - {{ media_data_dir }}/library/tv:/data/library/tv
+    networks:
+      - media
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ flaresolverr_port }}:8191"
+    networks:
+      - media
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    restart: unless-stopped
+    environment:
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ jellyseerr_port }}:5055"
+    volumes:
+      - {{ media_config_dir }}/jellyseerr:/app/config
+    networks:
+      - media
+
+networks:
+  media:
+    name: {{ media_docker_network }}

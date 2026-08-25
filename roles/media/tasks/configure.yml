@@ -1,0 +1,978 @@
+---
+# "docker compose up" só sobe os containers vazios — sem conta, sem
+# integração entre eles. Isso aqui existe pra sobreviver a uma migração
+# de máquina (Proxmox): tudo que antes foi feito manualmente via curl,
+# numa sessão de troubleshooting ao vivo, agora é idempotente e reaplica
+# sozinho num `ansible-playbook site.yml -K --tags media`.
+#
+# Bazarr também está aqui agora (ver CHANGELOG.md 2026-08-24 pra como o
+# formato real da API foi descoberto lendo o código-fonte de dentro do
+# próprio container — settings.py só aceita form-urlencoded com chaves
+# tipo "settings-<seção>-<campo>", nunca JSON, e bool tem que ser a
+# string minúscula "true"/"false", não "True"/"False").
+
+- name: Esperar o config.xml de cada app Servarr aparecer
+  ansible.builtin.wait_for:
+    path: "{{ media_config_dir }}/{{ item }}/config.xml"
+    timeout: 60
+  loop: [sonarr, radarr, prowlarr]
+
+- name: Ler a API key gerada por cada app Servarr
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -oP '<ApiKey>\K[^<]+' {{ media_config_dir }}/{{ item }}/config.xml
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: _api_key_reads
+  loop: [sonarr, radarr, prowlarr]
+
+- name: Guardar API keys em variáveis
+  ansible.builtin.set_fact:
+    sonarr_api_key: "{{ (_api_key_reads.results | selectattr('item', 'equalto', 'sonarr') | first).stdout }}"
+    radarr_api_key: "{{ (_api_key_reads.results | selectattr('item', 'equalto', 'radarr') | first).stdout }}"
+    prowlarr_api_key: "{{ (_api_key_reads.results | selectattr('item', 'equalto', 'prowlarr') | first).stdout }}"
+
+- name: Esperar Sonarr/Radarr/Prowlarr responderem
+  ansible.builtin.uri:
+    url: "http://localhost:{{ item }}/"
+    status_code: [200, 301, 302, 401]
+  register: _servarr_wait
+  until: _servarr_wait.status in [200, 301, 302, 401]
+  retries: 30
+  delay: 2
+  loop:
+    - "{{ sonarr_port }}"
+    - "{{ radarr_port }}"
+    - "{{ prowlarr_port }}"
+  loop_control:
+    label: "porta {{ item }}"
+
+# --- Sonarr/Radarr: autenticação forms + pasta raiz + qBittorrent ---
+- name: Configurar autenticação (admin/senha) do Sonarr e Radarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ item.port }}/api/v3/config/host/1"
+    method: PUT
+    headers:
+      X-Api-Key: "{{ item.key }}"
+    body_format: json
+    body:
+      id: 1
+      bindAddress: "*"
+      port: "{{ item.port }}"
+      sslPort: 9898
+      enableSsl: false
+      launchBrowser: true
+      authenticationMethod: forms
+      authenticationRequired: enabled
+      analyticsEnabled: true
+      username: admin
+      password: "{{ media_admin_password }}"
+      passwordConfirmation: "{{ media_admin_password }}"
+      logLevel: debug
+      logSizeLimit: 1
+      consoleLogLevel: ""
+      branch: "{{ item.branch }}"
+      apiKey: "{{ item.key }}"
+      sslCertPath: ""
+      sslCertPassword: ""
+      urlBase: ""
+      instanceName: "{{ item.name }}"
+      applicationUrl: ""
+      updateAutomatically: false
+      updateMechanism: docker
+      updateScriptPath: ""
+      proxyEnabled: false
+      proxyType: http
+      proxyHostname: ""
+      proxyPort: 8080
+      proxyUsername: ""
+      proxyPassword: ""
+      proxyBypassFilter: ""
+      proxyBypassLocalAddresses: true
+      certificateValidation: enabled
+      backupFolder: Backups
+      backupInterval: 7
+      backupRetention: 28
+      trustCgnatIpAddresses: false
+    status_code: [200, 202]
+  loop:
+    - { name: Sonarr, port: "{{ sonarr_port }}", key: "{{ sonarr_api_key }}", branch: main }
+    - { name: Radarr, port: "{{ radarr_port }}", key: "{{ radarr_api_key }}", branch: master }
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  # 202 (não 200): Sonarr/Radarr aceitam a mudança de forma assíncrona
+  # quando authenticationMethod muda — a app reinicia sozinha por dentro.
+
+- name: Garantir pasta raiz no Sonarr (/data/library/tv)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ sonarr_port }}/api/v3/rootfolder"
+    headers:
+      X-Api-Key: "{{ sonarr_api_key }}"
+    status_code: 200
+  register: _sonarr_rootfolders
+
+- name: Criar pasta raiz no Sonarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ sonarr_port }}/api/v3/rootfolder"
+    method: POST
+    headers:
+      X-Api-Key: "{{ sonarr_api_key }}"
+    body_format: json
+    body: {path: /data/library/tv}
+    status_code: 201
+  when: "'/data/library/tv' not in (_sonarr_rootfolders.json | map(attribute='path') | list)"
+
+- name: Garantir pasta raiz no Radarr (/data/library/movies)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ radarr_port }}/api/v3/rootfolder"
+    headers:
+      X-Api-Key: "{{ radarr_api_key }}"
+    status_code: 200
+  register: _radarr_rootfolders
+
+- name: Criar pasta raiz no Radarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ radarr_port }}/api/v3/rootfolder"
+    method: POST
+    headers:
+      X-Api-Key: "{{ radarr_api_key }}"
+    body_format: json
+    body: {path: /data/library/movies}
+    status_code: 201
+  when: "'/data/library/movies' not in (_radarr_rootfolders.json | map(attribute='path') | list)"
+
+- name: Garantir clientes de download cadastrados no Sonarr/Radarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ item.port }}/api/v3/downloadclient"
+    headers:
+      X-Api-Key: "{{ item.key }}"
+    status_code: 200
+  register: _download_clients
+  loop:
+    - { port: "{{ sonarr_port }}", key: "{{ sonarr_api_key }}" }
+    - { port: "{{ radarr_port }}", key: "{{ radarr_api_key }}" }
+  loop_control:
+    label: "porta {{ item.port }}"
+
+- name: Cadastrar qBittorrent como cliente de download no Sonarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ sonarr_port }}/api/v3/downloadclient"
+    method: POST
+    headers:
+      X-Api-Key: "{{ sonarr_api_key }}"
+    body_format: json
+    body:
+      enable: true
+      protocol: torrent
+      priority: 1
+      removeCompletedDownloads: true
+      removeFailedDownloads: true
+      name: qBittorrent
+      implementation: QBittorrent
+      implementationName: qBittorrent
+      configContract: QBittorrentSettings
+      fields:
+        - {name: host, value: qbittorrent}
+        - {name: port, value: "{{ qbittorrent_port }}"}
+        - {name: useSsl, value: false}
+        - {name: username, value: admin}
+        - {name: password, value: "{{ media_admin_password }}"}
+        - {name: category, value: tv-sonarr}
+    status_code: 201
+  when: (_download_clients.results[0].json | selectattr('implementation', 'equalto', 'QBittorrent') | list | length) == 0
+
+- name: Cadastrar qBittorrent como cliente de download no Radarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ radarr_port }}/api/v3/downloadclient"
+    method: POST
+    headers:
+      X-Api-Key: "{{ radarr_api_key }}"
+    body_format: json
+    body:
+      enable: true
+      protocol: torrent
+      priority: 1
+      removeCompletedDownloads: true
+      removeFailedDownloads: true
+      name: qBittorrent
+      implementation: QBittorrent
+      implementationName: qBittorrent
+      configContract: QBittorrentSettings
+      fields:
+        - {name: host, value: qbittorrent}
+        - {name: port, value: "{{ qbittorrent_port }}"}
+        - {name: useSsl, value: false}
+        - {name: username, value: admin}
+        - {name: password, value: "{{ media_admin_password }}"}
+        - {name: category, value: radarr}
+    status_code: 201
+  when: (_download_clients.results[1].json | selectattr('implementation', 'equalto', 'QBittorrent') | list | length) == 0
+
+# --- Prowlarr: autenticação + conexão com Sonarr/Radarr + FlareSolverr ---
+- name: Configurar autenticação (admin/senha) do Prowlarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/config/host/1"
+    method: PUT
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    body_format: json
+    body:
+      id: 1
+      bindAddress: "*"
+      port: "{{ prowlarr_port }}"
+      sslPort: 6969
+      enableSsl: false
+      launchBrowser: true
+      authenticationMethod: forms
+      authenticationRequired: enabled
+      analyticsEnabled: true
+      username: admin
+      password: "{{ media_admin_password }}"
+      passwordConfirmation: "{{ media_admin_password }}"
+      logLevel: debug
+      logSizeLimit: 1
+      consoleLogLevel: ""
+      branch: master
+      apiKey: "{{ prowlarr_api_key }}"
+      sslCertPath: ""
+      sslCertPassword: ""
+      urlBase: ""
+      instanceName: Prowlarr
+      applicationUrl: ""
+      updateAutomatically: false
+      updateMechanism: docker
+      updateScriptPath: ""
+      proxyEnabled: false
+      proxyType: http
+      proxyHostname: ""
+      proxyPort: 8080
+      proxyUsername: ""
+      proxyPassword: ""
+      proxyBypassFilter: ""
+      proxyBypassLocalAddresses: true
+      certificateValidation: enabled
+      backupFolder: Backups
+      backupInterval: 7
+      backupRetention: 28
+      historyCleanupDays: 30
+      trustCgnatIpAddresses: false
+    status_code: [200, 202]
+  changed_when: false
+
+- name: Garantir Applications cadastradas no Prowlarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/applications"
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    status_code: 200
+  register: _prowlarr_apps
+
+- name: Conectar Prowlarr -> Sonarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/applications"
+    method: POST
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    body_format: json
+    body:
+      name: Sonarr
+      implementation: Sonarr
+      implementationName: Sonarr
+      configContract: SonarrSettings
+      syncLevel: fullSync
+      fields:
+        - {name: prowlarrUrl, value: "http://prowlarr:{{ prowlarr_port }}"}
+        - {name: baseUrl, value: "http://sonarr:{{ sonarr_port }}"}
+        - {name: apiKey, value: "{{ sonarr_api_key }}"}
+        - {name: syncCategories, value: [5000, 5010, 5020, 5030, 5040, 5045, 5050]}
+    status_code: 201
+  when: "'Sonarr' not in (_prowlarr_apps.json | map(attribute='name') | list)"
+
+- name: Conectar Prowlarr -> Radarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/applications"
+    method: POST
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    body_format: json
+    body:
+      name: Radarr
+      implementation: Radarr
+      implementationName: Radarr
+      configContract: RadarrSettings
+      syncLevel: fullSync
+      fields:
+        - {name: prowlarrUrl, value: "http://prowlarr:{{ prowlarr_port }}"}
+        - {name: baseUrl, value: "http://radarr:{{ radarr_port }}"}
+        - {name: apiKey, value: "{{ radarr_api_key }}"}
+        - {name: syncCategories, value: [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060]}
+    status_code: 201
+  when: "'Radarr' not in (_prowlarr_apps.json | map(attribute='name') | list)"
+
+- name: Garantir tag "flaresolverr" no Prowlarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/tag"
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    status_code: 200
+  register: _prowlarr_tags
+
+- name: Criar tag "flaresolverr"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/tag"
+    method: POST
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    body_format: json
+    body: {label: flaresolverr}
+    status_code: 201
+  register: _flaresolverr_tag_created
+  when: "'flaresolverr' not in (_prowlarr_tags.json | map(attribute='label') | list)"
+
+- name: Descobrir o id da tag "flaresolverr"
+  ansible.builtin.set_fact:
+    flaresolverr_tag_id: >-
+      {{ _flaresolverr_tag_created.json.id
+         if _flaresolverr_tag_created is changed
+         else (_prowlarr_tags.json | selectattr('label', 'equalto', 'flaresolverr') | first).id }}
+
+- name: Garantir Indexer Proxy do FlareSolverr no Prowlarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/indexerproxy"
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    status_code: 200
+  register: _prowlarr_proxies
+
+- name: Cadastrar/atualizar Indexer Proxy do FlareSolverr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/indexerproxy{{ '' if _flaresolverr_proxy_id is none else '/' + (_flaresolverr_proxy_id | string) }}"
+    method: "{{ 'POST' if _flaresolverr_proxy_id is none else 'PUT' }}"
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    body_format: json
+    body:
+      id: "{{ _flaresolverr_proxy_id | default(omit) }}"
+      name: FlareSolverr
+      implementation: FlareSolverr
+      implementationName: FlareSolverr
+      configContract: FlareSolverrSettings
+      tags: ["{{ flaresolverr_tag_id }}"]
+      fields:
+        - {name: host, value: "http://flaresolverr:{{ flaresolverr_port }}/"}
+        - {name: requestTimeout, value: 60}
+    status_code: [200, 201, 202]
+  vars:
+    _flaresolverr_proxy_id: "{{ (_prowlarr_proxies.json | selectattr('name', 'equalto', 'FlareSolverr') | map(attribute='id') | list | first) | default(none, true) }}"
+
+# --- qBittorrent: senha permanente, save path certo, categorias ---
+- name: Testar login no qBittorrent com a senha final
+  ansible.builtin.uri:
+    url: "http://localhost:{{ qbittorrent_port }}/api/v2/auth/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      username: admin
+      password: "{{ media_admin_password }}"
+    headers:
+      Referer: "http://localhost:{{ qbittorrent_port }}"
+    status_code: [204, 403]
+  register: _qbt_login_final
+
+- name: Bloco de primeiro-boot do qBittorrent (senha ainda não é a final)
+  when: _qbt_login_final.status != 204
+  block:
+    - name: Ler a senha temporária do log do container
+      ansible.builtin.shell: |
+        set -o pipefail
+        docker logs qbittorrent 2>&1 | grep -oP 'temporary password is provided for this session: \K\S+' | tail -1
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: _qbt_temp_password
+
+    - name: Logar com a senha temporária
+      ansible.builtin.uri:
+        url: "http://localhost:{{ qbittorrent_port }}/api/v2/auth/login"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          username: admin
+          password: "{{ _qbt_temp_password.stdout }}"
+        headers:
+          Referer: "http://localhost:{{ qbittorrent_port }}"
+        status_code: 204
+      register: _qbt_login_temp
+      when: _qbt_temp_password.stdout | length > 0
+
+    - name: Setar a senha permanente do qBittorrent
+      ansible.builtin.uri:
+        url: "http://localhost:{{ qbittorrent_port }}/api/v2/app/setPreferences"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          json: "{{ {'web_ui_password': media_admin_password} | to_json }}"
+        headers:
+          Referer: "http://localhost:{{ qbittorrent_port }}"
+          Cookie: "QBT_SID_{{ qbittorrent_port }}={{ _qbt_login_temp.cookies['QBT_SID_' ~ qbittorrent_port] }}"
+        status_code: 200
+      when: _qbt_temp_password.stdout | length > 0
+
+- name: Logar no qBittorrent pra aplicar o resto da config
+  ansible.builtin.uri:
+    url: "http://localhost:{{ qbittorrent_port }}/api/v2/auth/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      username: admin
+      password: "{{ media_admin_password }}"
+    headers:
+      Referer: "http://localhost:{{ qbittorrent_port }}"
+    status_code: 204
+  register: _qbt_login
+
+- name: Corrigir o save path padrão do qBittorrent (a imagem usa /downloads, o volume é /data/downloads)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ qbittorrent_port }}/api/v2/app/setPreferences"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      json: '{"save_path":"/data/downloads","temp_path_enabled":false}'
+    headers:
+      Referer: "http://localhost:{{ qbittorrent_port }}"
+      Cookie: "QBT_SID_{{ qbittorrent_port }}={{ _qbt_login.cookies['QBT_SID_' ~ qbittorrent_port] }}"
+    status_code: 200
+  changed_when: false
+
+- name: Garantir categorias tv-sonarr/radarr no qBittorrent
+  ansible.builtin.uri:
+    url: "http://localhost:{{ qbittorrent_port }}/api/v2/torrents/categories"
+    headers:
+      Cookie: "QBT_SID_{{ qbittorrent_port }}={{ _qbt_login.cookies['QBT_SID_' ~ qbittorrent_port] }}"
+    status_code: 200
+  register: _qbt_categories
+
+- name: Criar categoria no qBittorrent
+  ansible.builtin.uri:
+    url: "http://localhost:{{ qbittorrent_port }}/api/v2/torrents/createCategory"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      category: "{{ item }}"
+      savePath: /data/downloads
+    headers:
+      Referer: "http://localhost:{{ qbittorrent_port }}"
+      Cookie: "QBT_SID_{{ qbittorrent_port }}={{ _qbt_login.cookies['QBT_SID_' ~ qbittorrent_port] }}"
+    status_code: 200
+  loop: [tv-sonarr, radarr]
+  loop_control:
+    label: "{{ item }}"
+  when: item not in _qbt_categories.json
+
+# --- Jellyfin: assistente inicial + bibliotecas ---
+- name: Esperar o Jellyfin responder
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/System/Info/Public"
+    status_code: 200
+  register: _jf_wait
+  until: _jf_wait.status == 200
+  retries: 30
+  delay: 2
+
+- name: Rodar o assistente inicial do Jellyfin (só na primeira vez)
+  when: not _jf_wait.json.StartupWizardCompleted
+  block:
+    - name: "Startup: idioma/região"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jellyfin_port }}/Startup/Configuration/"
+        method: POST
+        body_format: json
+        body: {ServerName: Jellyfin, UICulture: pt-BR, MetadataCountryCode: BR, PreferredMetadataLanguage: pt}
+        status_code: 200
+
+    - name: "Startup: criar usuário admin"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jellyfin_port }}/Startup/User/"
+        method: POST
+        body_format: json
+        body: {Name: admin, Password: "{{ media_admin_password }}"}
+        status_code: 204
+
+    - name: "Startup: acesso remoto"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jellyfin_port }}/Startup/RemoteAccess/"
+        method: POST
+        body_format: json
+        body: {EnableRemoteAccess: true, EnableAutomaticPortMapping: false}
+        status_code: 204
+
+    - name: "Startup: concluir o assistente"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jellyfin_port }}/Startup/Complete/"
+        method: POST
+        status_code: 204
+
+- name: Autenticar no Jellyfin como admin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Users/AuthenticateByName"
+    method: POST
+    body_format: json
+    body: {Username: admin, Pw: "{{ media_admin_password }}"}
+    headers:
+      X-Emby-Authorization: 'MediaBrowser Client="Ansible", Device="Ansible", DeviceId="ansible-media-role", Version="1.0.0"'
+    status_code: 200
+  register: _jf_auth
+
+- name: Garantir que o admin não fica "IsHidden" (o Jellyseerr precisa ver ele)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Users/{{ _jf_auth.json.User.Id }}/Policy"
+    method: POST
+    body_format: json
+    body: "{{ _jf_auth.json.User.Policy | combine({'IsHidden': false}) }}"
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    status_code: 204
+  when: _jf_auth.json.User.Policy.IsHidden
+
+- name: Garantir bibliotecas do Jellyfin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Library/VirtualFolders"
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    status_code: 200
+  register: _jf_libraries
+
+- name: Criar biblioteca no Jellyfin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Library/VirtualFolders?name={{ item.name | urlencode }}&collectionType={{ item.type }}&refreshLibrary=false"
+    method: POST
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    body_format: json
+    body:
+      LibraryOptions:
+        EnableInternetProviders: true
+        EnableRealtimeMonitor: true
+        PathInfos: [{Path: "{{ item.path }}"}]
+    status_code: 204
+  loop:
+    - {name: Filmes, type: movies, path: /data/movies}
+    - {name: Séries, type: tvshows, path: /data/tv}
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.type not in (_jf_libraries.json | map(attribute='CollectionType') | list)
+
+# Sem monitoramento em tempo real, o Jellyfin só descobre arquivo novo
+# (import do Radarr/Sonarr, ou legenda baixada pelo Bazarr — esse não
+# tem como avisar o Jellyfin como o Radarr/Sonarr avisam) num scan
+# manual/agendado. Reaplicado sempre (idempotente em efeito, não só na
+# criação) pra cobrir bibliotecas que já existiam antes dessa mudança.
+- name: Garantir monitoramento em tempo real nas bibliotecas do Jellyfin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Library/VirtualFolders/LibraryOptions"
+    method: POST
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    body_format: json
+    body:
+      Id: "{{ item.ItemId }}"
+      LibraryOptions: "{{ item.LibraryOptions | combine({'EnableRealtimeMonitor': true}) }}"
+    status_code: 204
+  loop: "{{ _jf_libraries.json }}"
+  loop_control:
+    label: "{{ item.Name }}"
+  when: not item.LibraryOptions.EnableRealtimeMonitor
+  changed_when: false
+
+# --- Sonarr/Radarr -> Jellyfin: atualizar biblioteca sozinho ao importar ---
+# Sem isso, o Jellyfin só descobre arquivo novo num scan manual/agendado
+# — passou despercebido até o gabriel notar que um filme já importado
+# pelo Radarr não aparecia no Jellyfin.
+- name: Garantir uma API key do Jellyfin pro Sonarr/Radarr chamarem
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Auth/Keys"
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    status_code: 200
+  register: _jf_keys
+
+- name: Criar a API key "Ansible" no Jellyfin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Auth/Keys?App=Ansible"
+    method: POST
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    status_code: 204
+  when: "'Ansible' not in (_jf_keys.json.Items | map(attribute='AppName') | list)"
+  register: _jf_key_created
+
+- name: Reler as API keys do Jellyfin (pra pegar a recém-criada)
+  # Sempre relê (em vez de só quando mudou): usar quando+mesmo nome de
+  # variável do registro anterior faz o Ansible sobrescrever `_jf_keys`
+  # com o resultado (vazio) da task pulada, perdendo o valor bom.
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/Auth/Keys"
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    status_code: 200
+  register: _jf_keys
+
+- name: Guardar a API key "Ansible" do Jellyfin
+  ansible.builtin.set_fact:
+    jellyfin_ansible_api_key: "{{ (_jf_keys.json.Items | selectattr('AppName', 'equalto', 'Ansible') | first).AccessToken }}"
+
+- name: Garantir notificações já cadastradas no Sonarr/Radarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ item.port }}/api/v3/notification"
+    headers:
+      X-Api-Key: "{{ item.key }}"
+    status_code: 200
+  register: _arr_notifications
+  loop:
+    - {port: "{{ sonarr_port }}", key: "{{ sonarr_api_key }}"}
+    - {port: "{{ radarr_port }}", key: "{{ radarr_api_key }}"}
+  loop_control:
+    label: "porta {{ item.port }}"
+
+- name: Conectar o Jellyfin como notificação no Sonarr (atualiza biblioteca ao importar)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ sonarr_port }}/api/v3/notification"
+    method: POST
+    headers:
+      X-Api-Key: "{{ sonarr_api_key }}"
+    body_format: json
+    body:
+      name: Jellyfin
+      implementation: MediaBrowser
+      implementationName: Emby/Jellyfin
+      configContract: MediaBrowserSettings
+      onGrab: false
+      onDownload: true
+      onUpgrade: true
+      onRename: true
+      onSeriesAdd: false
+      onSeriesDelete: true
+      onEpisodeFileDelete: true
+      onEpisodeFileDeleteForUpgrade: true
+      onHealthIssue: false
+      onApplicationUpdate: false
+      includeHealthWarnings: false
+      onManualInteractionRequired: false
+      fields:
+        - {name: host, value: jellyfin}
+        - {name: port, value: "{{ jellyfin_port }}"}
+        - {name: useSsl, value: false}
+        - {name: apiKey, value: "{{ jellyfin_ansible_api_key }}"}
+        - {name: notify, value: false}
+        - {name: updateLibrary, value: true}
+    status_code: 201
+  when: "'MediaBrowser' not in (_arr_notifications.results[0].json | map(attribute='implementation') | list)"
+
+- name: Conectar o Jellyfin como notificação no Radarr (atualiza biblioteca ao importar)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ radarr_port }}/api/v3/notification"
+    method: POST
+    headers:
+      X-Api-Key: "{{ radarr_api_key }}"
+    body_format: json
+    body:
+      name: Jellyfin
+      implementation: MediaBrowser
+      implementationName: Emby/Jellyfin
+      configContract: MediaBrowserSettings
+      onGrab: false
+      onDownload: true
+      onUpgrade: true
+      onRename: true
+      onMovieAdded: false
+      onMovieDelete: true
+      onMovieFileDelete: true
+      onMovieFileDeleteForUpgrade: true
+      onHealthIssue: false
+      onApplicationUpdate: false
+      includeHealthWarnings: false
+      onManualInteractionRequired: false
+      fields:
+        - {name: host, value: jellyfin}
+        - {name: port, value: "{{ jellyfin_port }}"}
+        - {name: useSsl, value: false}
+        - {name: apiKey, value: "{{ jellyfin_ansible_api_key }}"}
+        - {name: notify, value: false}
+        - {name: updateLibrary, value: true}
+    status_code: 201
+  when: "'MediaBrowser' not in (_arr_notifications.results[1].json | map(attribute='implementation') | list)"
+
+# --- Jellyseerr: setup inicial + Sonarr/Radarr + bibliotecas ---
+- name: Esperar o Jellyseerr responder
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/public"
+    status_code: 200
+  register: _jsr_public
+  until: _jsr_public.status == 200
+  retries: 30
+  delay: 2
+
+# Achado testando de verdade: POST /api/v1/auth/jellyfin exige um campo
+# `serverType` (2 = Jellyfin) que não existe em nenhum exemplo de doc por
+# aí — sem ele, cai num erro genérico `NO_ADMIN_USER` que não tem nada a
+# ver com o Jellyfin em si. E se `settings.jellyfin.ip` já estiver
+# preenchido (ex.: rerun depois de um setup parcial), mandar `hostname`
+# de novo derruba com "Jellyfin hostname already configured" — por isso
+# o corpo muda dependendo do que já está salvo.
+- name: "Jellyseerr: rodar o setup inicial (só na primeira vez)"
+  when: not _jsr_public.json.initialized
+  block:
+    - name: Ver se o Jellyfin já está salvo nas settings do Jellyseerr
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/jellyfin"
+        status_code: 200
+      register: _jsr_jf_settings
+
+    - name: "Setup: autenticar o admin do Jellyfin (cria o admin do Jellyseerr)"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jellyseerr_port }}/api/v1/auth/jellyfin"
+        method: POST
+        body_format: json
+        body: "{{ _jsr_setup_body }}"
+        status_code: 200
+      vars:
+        _jsr_setup_body: >-
+          {{ {'username': 'admin', 'password': media_admin_password, 'serverType': 2}
+             if _jsr_jf_settings.json.ip
+             else {'username': 'admin', 'password': media_admin_password, 'serverType': 2,
+                   'hostname': 'jellyfin', 'port': jellyfin_port, 'useSsl': false, 'urlBase': ''} }}
+      register: _jsr_setup_auth
+
+    - name: "Setup: marcar como inicializado"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/initialize"
+        method: POST
+        headers:
+          Cookie: "connect.sid={{ _jsr_setup_auth.cookies['connect.sid'] }}"
+        status_code: 200
+
+- name: "Jellyseerr: logar como admin (sessão pro resto da config)"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/auth/jellyfin"
+    method: POST
+    body_format: json
+    body: {username: admin, password: "{{ media_admin_password }}", serverType: 2}
+    status_code: 200
+  register: _jsr_login
+
+- name: "Jellyseerr: guardar cookie de sessão"
+  ansible.builtin.set_fact:
+    jsr_cookie: "connect.sid={{ _jsr_login.cookies['connect.sid'] }}"
+
+# `?sync=true` sozinho tem um efeito colateral no próprio Jellyseerr: ele
+# redescobre as bibliotecas E zera o `enabled` de todas (só fica true se
+# vier junto no parâmetro `enable` do mesmo request). Ou seja, não tem
+# como só "sincronizar" sem também reafirmar quais ficam habilitadas —
+# por isso os três passos abaixo sempre rodam juntos, sem guarda de
+# idempotência (não tem o que verificar antes: o sync já reseta tudo).
+- name: "Jellyseerr: sincronizar bibliotecas do Jellyfin"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/jellyfin/library?sync=true"
+    headers: {Cookie: "{{ jsr_cookie }}"}
+    status_code: 200
+  register: _jsr_libraries
+  changed_when: false
+
+- name: "Jellyseerr: habilitar todas as bibliotecas encontradas"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/jellyfin/library?enable={{ (_jsr_libraries.json | map(attribute='id') | list) | join(',') }}"
+    headers: {Cookie: "{{ jsr_cookie }}"}
+    status_code: 200
+  changed_when: false
+
+- name: "Jellyseerr: iniciar scan das bibliotecas"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/jellyfin/sync"
+    method: POST
+    headers: {Cookie: "{{ jsr_cookie }}"}
+    body_format: json
+    body: {start: true}
+    status_code: 200
+  changed_when: false
+
+- name: "Jellyseerr: checar Radarr/Sonarr já cadastrados"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/{{ item }}"
+    headers: {Cookie: "{{ jsr_cookie }}"}
+    status_code: 200
+  register: _jsr_arr_check
+  loop: [radarr, sonarr]
+
+- name: "Jellyseerr: descobrir o perfil de qualidade HD-1080p no Radarr/Sonarr"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/{{ item.app }}/test"
+    method: POST
+    headers: {Cookie: "{{ jsr_cookie }}"}
+    body_format: json
+    body: {hostname: "{{ item.app }}", port: "{{ item.port }}", apiKey: "{{ item.key }}", useSsl: false, baseUrl: ""}
+    status_code: 200
+  register: _jsr_arr_test
+  loop:
+    - {app: radarr, port: "{{ radarr_port }}", key: "{{ radarr_api_key }}"}
+    - {app: sonarr, port: "{{ sonarr_port }}", key: "{{ sonarr_api_key }}"}
+  loop_control:
+    label: "{{ item.app }}"
+  when: (_jsr_arr_check.results | selectattr('item', 'equalto', item.app) | first).json | length == 0
+
+- name: "Jellyseerr: cadastrar Radarr"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/radarr"
+    method: POST
+    headers: {Cookie: "{{ jsr_cookie }}"}
+    body_format: json
+    body:
+      name: Radarr
+      hostname: radarr
+      port: "{{ radarr_port }}"
+      apiKey: "{{ radarr_api_key }}"
+      useSsl: false
+      baseUrl: ""
+      activeProfileId: "{{ (_jsr_arr_test.results[0].json.profiles | selectattr('name', 'equalto', 'HD-1080p') | first).id }}"
+      activeProfileName: HD-1080p
+      activeDirectory: /data/library/movies
+      is4k: false
+      minimumAvailability: released
+      isDefault: true
+      externalUrl: ""
+      syncEnabled: true
+      preventSearch: false
+      tagRequests: false
+      tags: []
+    status_code: 201
+  when: (_jsr_arr_check.results[0].json | length) == 0
+
+- name: "Jellyseerr: cadastrar Sonarr"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyseerr_port }}/api/v1/settings/sonarr"
+    method: POST
+    headers: {Cookie: "{{ jsr_cookie }}"}
+    body_format: json
+    body:
+      name: Sonarr
+      hostname: sonarr
+      port: "{{ sonarr_port }}"
+      apiKey: "{{ sonarr_api_key }}"
+      useSsl: false
+      baseUrl: ""
+      activeProfileId: "{{ (_jsr_arr_test.results[1].json.profiles | selectattr('name', 'equalto', 'HD-1080p') | first).id }}"
+      activeProfileName: HD-1080p
+      activeDirectory: /data/library/tv
+      activeAnimeProfileId: "{{ (_jsr_arr_test.results[1].json.profiles | selectattr('name', 'equalto', 'HD-1080p') | first).id }}"
+      activeAnimeProfileName: HD-1080p
+      activeAnimeDirectory: /data/library/tv
+      is4k: false
+      isDefault: true
+      externalUrl: ""
+      syncEnabled: true
+      preventSearch: false
+      tagRequests: false
+      animeSeriesType: standard
+      seriesType: standard
+      enableSeasonFolders: true
+      tags: []
+      animeTags: []
+    status_code: 201
+  when: (_jsr_arr_check.results[1].json | length) == 0
+
+# --- Bazarr: idiomas + perfil + conexão com Sonarr/Radarr ---
+- name: Esperar o config.yaml do Bazarr aparecer
+  ansible.builtin.wait_for:
+    path: "{{ media_config_dir }}/bazarr/config/config.yaml"
+    timeout: 60
+
+- name: Ler a API key do Bazarr
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -oP 'apikey: \K[a-f0-9]+' {{ media_config_dir }}/bazarr/config/config.yaml | head -1
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: _bazarr_key_read
+
+- name: Guardar a API key do Bazarr
+  ansible.builtin.set_fact:
+    bazarr_api_key: "{{ _bazarr_key_read.stdout }}"
+
+- name: Esperar o Bazarr responder
+  ansible.builtin.uri:
+    url: "http://localhost:{{ bazarr_port }}/api/system/status"
+    headers: {X-API-KEY: "{{ bazarr_api_key }}"}
+    status_code: 200
+  register: _bazarr_wait
+  until: _bazarr_wait.status == 200
+  retries: 30
+  delay: 2
+
+- name: Habilitar idiomas e criar o perfil "pt-BR + EN" no Bazarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ bazarr_port }}/api/system/settings"
+    method: POST
+    headers: {X-API-KEY: "{{ bazarr_api_key }}"}
+    body_format: form-urlencoded
+    body:
+      - [languages-enabled, pb]
+      - [languages-enabled, en]
+      - [languages-profiles, '[{"profileId":1,"name":"pt-BR + EN","cutoff":null,"originalFormat":null,"mustContain":[],"mustNotContain":[],"items":[{"id":1,"language":"pb","forced":"False","hi":"False","audio_exclude":"False","audio_only_include":"False"},{"id":2,"language":"en","forced":"False","hi":"False","audio_exclude":"False","audio_only_include":"False"}]}]']
+    status_code: 204
+  changed_when: false
+
+- name: Conectar Sonarr/Radarr e definir o perfil padrão no Bazarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ bazarr_port }}/api/system/settings"
+    method: POST
+    headers: {X-API-KEY: "{{ bazarr_api_key }}"}
+    body_format: form-urlencoded
+    body:
+      - [settings-general-use_sonarr, "true"]
+      - [settings-general-use_radarr, "true"]
+      - [settings-sonarr-ip, sonarr]
+      - [settings-sonarr-port, "{{ sonarr_port }}"]
+      - [settings-sonarr-base_url, "/"]
+      - [settings-sonarr-ssl, "false"]
+      - [settings-sonarr-apikey, "{{ sonarr_api_key }}"]
+      - [settings-radarr-ip, radarr]
+      - [settings-radarr-port, "{{ radarr_port }}"]
+      - [settings-radarr-base_url, "/"]
+      - [settings-radarr-ssl, "false"]
+      - [settings-radarr-apikey, "{{ radarr_api_key }}"]
+      - [settings-general-serie_default_enabled, "true"]
+      - [settings-general-serie_default_profile, "1"]
+      - [settings-general-movie_default_enabled, "true"]
+      - [settings-general-movie_default_profile, "1"]
+    status_code: 204
+  changed_when: false
+
+- name: Habilitar os provedores de legenda no Bazarr (napiprojekt + opensubtitlescom)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ bazarr_port }}/api/system/settings"
+    method: POST
+    headers: {X-API-KEY: "{{ bazarr_api_key }}"}
+    body_format: form-urlencoded
+    body:
+      - [settings-general-enabled_providers, napiprojekt]
+      - [settings-general-enabled_providers, opensubtitlescom]
+    status_code: 204
+  changed_when: false
+
+# A API do opensubtitles.com exige o USERNAME da conta pra login, não o
+# e-mail (rejeita explicitamente com uma mensagem de erro sobre isso) —
+# achado testando direto contra a API deles, fora do Bazarr, pra isolar
+# se o problema era credencial ou algo do lado do Bazarr.
+- name: Conectar o opensubtitles.com no Bazarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ bazarr_port }}/api/system/settings"
+    method: POST
+    headers: {X-API-KEY: "{{ bazarr_api_key }}"}
+    body_format: form-urlencoded
+    body:
+      - [settings-opensubtitlescom-username, "{{ bazarr_opensubtitlescom_username }}"]
+      - [settings-opensubtitlescom-password, "{{ bazarr_opensubtitlescom_password }}"]
+    status_code: 204
+  changed_when: false

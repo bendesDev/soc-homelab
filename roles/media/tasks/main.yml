@@ -1,0 +1,59 @@
+---
+# /mnt/storage é root:root (dono do ponto de montagem, criado pelo role
+# storage) — sem become aqui o gabriel não consegue nem criar o diretório
+# raiz do stack. owner/group = media_puid/media_pgid pra bater com o PUID/PGID
+# passado aos containers (senão os serviços rodando como 1000:1000 não
+# conseguem escrever nos próprios diretórios de config/dados).
+- name: Criar diretório raiz do stack de mídia
+  ansible.builtin.file:
+    path: "{{ media_dir }}"
+    state: directory
+    mode: "0755"
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+  become: true
+
+- name: Criar diretórios de config de cada serviço do stack de mídia
+  ansible.builtin.file:
+    path: "{{ media_config_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+  loop:
+    - jellyfin
+    - sonarr
+    - radarr
+    - prowlarr
+    - bazarr
+    - qbittorrent
+    - jellyseerr
+  become: true
+
+- name: Criar diretórios de downloads e biblioteca
+  ansible.builtin.file:
+    path: "{{ media_data_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+  loop:
+    - downloads
+    - library/movies
+    - library/tv
+  become: true
+
+- name: Escrever docker-compose.yml do stack de mídia
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ media_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Subir o stack de mídia
+  community.docker.docker_compose_v2:
+    project_src: "{{ media_dir }}"
+    state: present
+  become: true
+
+- name: Configurar contas e integrações entre os serviços
+  ansible.builtin.import_tasks: configure.yml
