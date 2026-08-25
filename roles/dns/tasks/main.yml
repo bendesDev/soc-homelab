@@ -6,6 +6,44 @@
     mode: "0755"
   become: true
 
+- name: Criar diretório de drop-in do systemd para o dnsmasq
+  ansible.builtin.file:
+    path: /etc/systemd/system/dnsmasq.service.d
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: "Esperar a rede estar de fato online antes do dnsmasq subir (evita crash-loop no boot/resume: o unit padrão do Arch só tem After=network.target, que não garante que o IP estático já foi atribuído pelo NetworkManager)"
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/dnsmasq.service.d/override.conf
+    content: |
+      # Gerenciado pelo Ansible (roles/dns) — não editar à mão.
+      [Unit]
+      After=network-online.target
+      Wants=network-online.target
+    mode: "0644"
+  become: true
+  register: dnsmasq_override
+  notify: Restart dnsmasq
+
+- name: Recarregar unidades do systemd após o drop-in
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: dnsmasq_override is changed
+
+- name: Garantir que o NetworkManager-wait-online está habilitado (necessário pro network-online.target funcionar de verdade)
+  ansible.builtin.systemd:
+    name: NetworkManager-wait-online.service
+    enabled: true
+  become: true
+
+- name: Limpar estado "failed" do dnsmasq, se houver (deixado por um crash-loop antigo — sem isso o systemd não tenta subir de novo sozinho)
+  ansible.builtin.command: systemctl reset-failed dnsmasq
+  become: true
+  changed_when: false
+  failed_when: false
+
 - name: Escrever registros do domínio {{ dns_domain }}
   ansible.builtin.template:
     src: lab-hosts.j2
