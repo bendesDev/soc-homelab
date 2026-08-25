@@ -9,3 +9,4 @@ pacman_packages:
 # Pacotes instalados via AUR (via paru, já presente no sistema).
 aur_packages:
   - wazuh-agent
+  - ani-cli

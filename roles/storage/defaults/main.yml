@@ -1,4 +1,10 @@
 ---
+# PERIGO: esta role particiona (GPT) e formata (ext4) storage_disk
+# inteiro do zero — é destrutivo. Nesta máquina, /dev/sda é um segundo
+# disco dedicado só a dados, sem nada de sistema. Em qualquer outra
+# máquina, confirme com `lsblk` que storage_disk NÃO é o disco onde o
+# sistema operacional está instalado antes de rodar `--tags storage` —
+# senão essa role apaga o sistema.
 storage_disk: /dev/sda
 storage_partition: /dev/sda1
 storage_mount_point: /mnt/storage
