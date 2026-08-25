@@ -1,0 +1,15 @@
+---
+libvirt_packages:
+  - qemu-full
+  - libvirt
+  - virt-install
+  - virt-manager
+  - edk2-ovmf
+  - swtpm
+  - libosinfo
+  - osinfo-db
+  - python-lxml # community.libvirt precisa disso pro Ansible falar com o libvirt
+  - wimlib # inspecionar o install.wim da ISO (índices de edição)
+  - libisoburn # xorriso, pra gerar o ISO do autounattend.xml
+
+libvirt_vm_storage_dir: /mnt/storage/vms

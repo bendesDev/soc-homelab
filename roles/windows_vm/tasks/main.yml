@@ -1,27 +1,114 @@
 ---
-- name: Criar diretórios das VMs Windows
-  ansible.builtin.file:
-    path: "{{ windows_vm_base_dir }}/{{ item.name }}"
-    state: directory
-    mode: "0755"
+- name: Validar que a ISO do Windows foi informada
+  ansible.builtin.assert:
+    that:
+      - windows_vm_iso_path | length > 0
+    fail_msg: >-
+      windows_vm_iso_path não foi definido em roles/windows_vm/vars/main.yml.
+      Baixe a ISO do Windows 11 manualmente e aponte o caminho lá.
+
+- name: Verificar se o arquivo da ISO existe
+  ansible.builtin.stat:
+    path: "{{ windows_vm_iso_path }}"
+  register: _windows_iso_stat
+
+- name: Falhar se a ISO não existe no caminho informado
+  ansible.builtin.assert:
+    that:
+      - _windows_iso_stat.stat.exists
+    fail_msg: "ISO não encontrada em {{ windows_vm_iso_path }}"
+
+- name: Descobrir a bridge Linux por trás da rede Docker do pentest_lab
+  # As VMs entram na MESMA bridge que os containers (kali, linux-target,
+  # wazuh manager) — sem NAT/rota extra, todo mundo no mesmo L2. Buscado
+  # dinamicamente porque o nome da bridge (br-<id curto>) muda se a rede
+  # Docker for recriada.
+  community.docker.docker_network_info:
+    name: "{{ pentest_network_name }}"
+  register: _pentest_net_info
+
+- name: Definir fato da bridge das VMs Windows
+  ansible.builtin.set_fact:
+    windows_vm_bridge: "br-{{ _pentest_net_info.network.Id[:12] }}"
+
+- name: Criar disco qcow2 de cada VM Windows (só se ainda não existir)
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img create -f qcow2
+      {{ windows_vm_storage_dir }}/{{ item.name }}.qcow2
+      {{ item.disk_gb }}G
+    creates: "{{ windows_vm_storage_dir }}/{{ item.name }}.qcow2"
   loop: "{{ windows_instances }}"
   loop_control:
     label: "{{ item.name }}"
 
-- name: Escrever docker-compose.yml de cada VM Windows
+- name: Renderizar autounattend.xml de cada VM Windows
+  # community.libvirt.virt_install (--unattended) não suporta Windows —
+  # o libosinfo não tem install-script pra essa família de SO. Por isso
+  # o autounattend.xml é escrito à mão e entregue via uma ISO de dados
+  # pequena e separada (ver próximas tarefas), não remasterizando a ISO
+  # do Windows: uma primeira tentativa remasterizando a ISO grande com
+  # xorriso quebrou o boot UEFI (ela usa uma entrada "hidden" de El
+  # Torito pro boot EFI que o "-boot_image any replay" não reconstrói
+  # direito). Um disquinho FAT via USB também foi tentado antes desta
+  # ISO — o Windows Setup não achou o arquivo nele.
   ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ windows_vm_base_dir }}/{{ item.name }}/docker-compose.yml"
+    src: autounattend.xml.j2
+    dest: "{{ windows_vm_storage_dir }}/{{ item.name }}-autounattend.xml"
     mode: "0644"
   loop: "{{ windows_instances }}"
   loop_control:
     label: "{{ item.name }}"
 
-- name: Subir as VMs Windows
-  community.docker.docker_compose_v2:
-    project_src: "{{ windows_vm_base_dir }}/{{ item.name }}"
-    state: present
+- name: Criar ISO de dados com o autounattend.xml de cada VM
+  ansible.builtin.command:
+    cmd: >-
+      xorriso -as mkisofs -o {{ windows_vm_storage_dir }}/{{ item.name }}-autounattend.iso
+      -V AUTOUNATTEND -J -R -graft-points
+      AUTOUNATTEND.XML={{ windows_vm_storage_dir }}/{{ item.name }}-autounattend.xml
+    creates: "{{ windows_vm_storage_dir }}/{{ item.name }}-autounattend.iso"
   loop: "{{ windows_instances }}"
   loop_control:
     label: "{{ item.name }}"
-  become: true
+
+- name: Verificar se o domínio libvirt de cada VM já existe
+  ansible.builtin.command:
+    cmd: virsh --connect qemu:///system dominfo {{ item.name }}
+  register: _windows_domain_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ windows_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Criar e instalar as VMs Windows (autounattend, TPM 2.0 + UEFI)
+  # community.libvirt.virt_install não suporta um segundo --disk com
+  # device=cdrom (o argspec do módulo não tem essa chave), por isso
+  # aqui é virt-install puro. Dois CD-ROMs: a ISO oficial do Windows
+  # (boot) e a ISO pequena do autounattend.xml (só leitura de dados,
+  # não precisa ser bootável).
+  ansible.builtin.command:
+    cmd: >-
+      virt-install --connect qemu:///system
+      --name {{ item.item.name }}
+      --memory {{ item.item.memory_mb }} --vcpus {{ item.item.vcpus }}
+      --osinfo name={{ windows_vm_osinfo }}
+      --cdrom {{ windows_vm_iso_path }}
+      --disk path={{ windows_vm_storage_dir }}/{{ item.item.name }}.qcow2,bus=sata,size={{ item.item.disk_gb }}
+      --disk path={{ windows_vm_storage_dir }}/{{ item.item.name }}-autounattend.iso,device=cdrom,bus=sata
+      --network bridge={{ windows_vm_bridge }},model=e1000e
+      --tpm backend.type=emulator,backend.version=2.0,model=tpm-crb
+      --graphics vnc,listen=127.0.0.1,port={{ item.item.vnc_port }}
+      --noautoconsole
+  loop: "{{ _windows_domain_check.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0
+
+- name: Garantir que as VMs sobem sozinhas com o host (autostart no libvirt)
+  community.libvirt.virt:
+    name: "{{ item.name }}"
+    autostart: true
+  loop: "{{ windows_instances }}"
+  loop_control:
+    label: "{{ item.name }}"

@@ -1,19 +1,19 @@
 ---
-windows_vm_base_dir: /home/gabriel/soc-lab/windows
-pentest_network_name: pentest_lab
+windows_vm_storage_dir: "{{ libvirt_vm_storage_dir }}"
+windows_vm_osinfo: win11
+windows_vm_gateway: 10.10.20.1 # gateway que o Docker atribui pra pentest_network_subnet (10.10.20.0/24)
+windows_vm_dns: "{{ dns_lan_ip }}"
 
 windows_instances:
   - name: win11-a
-    version: "11"
-    ram_size: 4G
-    cpu_cores: 2
-    disk_size: 64G
-    vnc_port: 8006
-    rdp_port: 3389
+    memory_mb: 8192
+    vcpus: 4
+    disk_gb: 80
+    ip: 10.10.20.10
+    vnc_port: 5910
   - name: win11-b
-    version: "11"
-    ram_size: 4G
-    cpu_cores: 2
-    disk_size: 64G
-    vnc_port: 8007
-    rdp_port: 3390
+    memory_mb: 8192
+    vcpus: 4
+    disk_gb: 80
+    ip: 10.10.20.11
+    vnc_port: 5911

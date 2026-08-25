@@ -1,0 +1,42 @@
+---
+- name: Instalar pacotes de virtualização (QEMU/KVM, libvirt, virt-install, UEFI, vTPM)
+  community.general.pacman:
+    name: "{{ libvirt_packages }}"
+    state: present
+  become: true
+
+- name: Adicionar gabriel aos grupos libvirt e kvm
+  # Necessário pra usar virsh/virt-viewer sem sudo. Só faz efeito numa
+  # sessão de login nova (o usuário precisa deslogar/logar de novo).
+  ansible.builtin.user:
+    name: gabriel
+    groups:
+      - libvirt
+      - kvm
+    append: true
+  become: true
+
+- name: Habilitar e iniciar o libvirtd
+  ansible.builtin.systemd:
+    name: libvirtd.service
+    enabled: true
+    state: started
+  become: true
+
+- name: Garantir que a rede "default" do libvirt (NAT) está ativa
+  # Não é usada pelas VMs do lab (elas vão direto na bridge do
+  # pentest_lab), mas o libvirt reclama/loga erros se ela não existir.
+  community.libvirt.virt_net:
+    name: default
+    state: active
+    autostart: true
+  become: true
+
+- name: Criar diretório de armazenamento das VMs
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_storage_dir }}"
+    state: directory
+    owner: gabriel
+    group: gabriel
+    mode: "0755"
+  become: true

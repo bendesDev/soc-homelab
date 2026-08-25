@@ -1,0 +1,12 @@
+---
+# Copiar para main.yml (gitignored) e preencher com os valores reais.
+# Ver docs/OPERATIONS.md, seção "Segredos (senhas) por role".
+windows_vm_admin_password: "CHANGE_ME"
+
+# Caminho local (nesta máquina) do arquivo .iso do Windows 11, baixado
+# manualmente do site da Microsoft. A role usa a mesma ISO pra todas as
+# VMs em windows_instances. IMPORTANTE: coloque em /mnt/storage/vms (ou
+# outro diretório de leitura aberta), não em ~/Downloads — o processo do
+# libvirt/QEMU roda como outro usuário e não consegue atravessar um
+# diretório home (modo 700).
+windows_vm_iso_path: "/mnt/storage/vms/win11.iso"
