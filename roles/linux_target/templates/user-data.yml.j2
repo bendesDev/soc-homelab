@@ -1,0 +1,28 @@
+#cloud-config
+# Gerenciado pelo Ansible (roles/linux_target) — não editar à mão.
+hostname: {{ linux_target_name }}
+manage_etc_hosts: true
+
+users:
+  - name: gabriel
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    lock_passwd: false
+    ssh_authorized_keys:
+      - {{ linux_target_ssh_pubkey }}
+
+chpasswd:
+  expire: false
+  list: |
+    gabriel:{{ linux_target_password }}
+ssh_pwauth: true
+
+package_update: true
+packages:
+  - auditd
+  - qemu-guest-agent
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now auditd

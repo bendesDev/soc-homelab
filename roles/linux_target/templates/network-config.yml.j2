@@ -1,0 +1,11 @@
+version: 2
+ethernets:
+  primary:
+    match:
+      name: "en*"
+    dhcp4: false
+    addresses:
+      - {{ linux_target_ip }}/24
+    gateway4: {{ linux_target_gateway }}
+    nameservers:
+      addresses: [{{ linux_target_dns }}]

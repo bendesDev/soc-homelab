@@ -1,10 +1,11 @@
 ---
-linux_target_dir: /home/gabriel/soc-lab/linux-target
-linux_target_container_name: linux-target
-pentest_network_name: pentest_lab
-linux_target_boot: debian
-linux_target_ram_size: 2G
-linux_target_cpu_cores: 2
-linux_target_disk_size: 32G
-linux_target_vnc_port: 8008
-linux_target_ssh_port: 2222
+linux_target_storage_dir: "{{ libvirt_vm_storage_dir }}"
+linux_target_image_url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+linux_target_name: linux-target
+linux_target_memory_mb: 2048
+linux_target_vcpus: 2
+linux_target_disk_gb: 20
+linux_target_ip: 10.10.20.20
+linux_target_gateway: 10.10.20.1 # mesmo gateway do resto da pentest_network_subnet
+linux_target_dns: "{{ dns_lan_ip }}"
+linux_target_vnc_port: 5920

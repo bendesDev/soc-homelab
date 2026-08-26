@@ -1,18 +1,92 @@
 ---
-- name: Criar diretório do alvo Linux
-  ansible.builtin.file:
-    path: "{{ linux_target_dir }}"
-    state: directory
-    mode: "0755"
+- name: Validar que a senha do linux-target foi definida
+  ansible.builtin.assert:
+    that:
+      - linux_target_password | length > 0
+    fail_msg: >-
+      linux_target_password não foi definido em
+      roles/linux_target/vars/main.yml.
 
-- name: Escrever docker-compose.yml do alvo Linux
+- name: Descobrir a bridge Linux por trás da rede Docker do pentest_lab
+  community.docker.docker_network_info:
+    name: "{{ pentest_network_name }}"
+  register: _pentest_net_info
+
+- name: Definir fato da bridge do linux-target
+  ansible.builtin.set_fact:
+    linux_target_bridge: "br-{{ _pentest_net_info.network.Id[:12] }}"
+
+- name: Baixar a cloud image oficial do Debian 12 (base, compartilhada)
+  ansible.builtin.get_url:
+    url: "{{ linux_target_image_url }}"
+    dest: "{{ linux_target_storage_dir }}/debian-12-base.qcow2"
+  register: _debian_base_image
+
+- name: Criar o disco da VM como overlay da imagem base (copy-on-write)
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img create -f qcow2 -F qcow2
+      -b {{ linux_target_storage_dir }}/debian-12-base.qcow2
+      {{ linux_target_storage_dir }}/{{ linux_target_name }}.qcow2
+    creates: "{{ linux_target_storage_dir }}/{{ linux_target_name }}.qcow2"
+  register: _disk_created
+
+- name: Expandir o disco da VM (só logo depois de criado)
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img resize {{ linux_target_storage_dir }}/{{ linux_target_name }}.qcow2
+      {{ linux_target_disk_gb }}G
+  when: _disk_created is changed
+
+- name: Renderizar arquivos do cloud-init (NoCloud)
   ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ linux_target_dir }}/docker-compose.yml"
+    src: "{{ item }}.j2"
+    dest: "{{ linux_target_storage_dir }}/{{ linux_target_name }}-{{ item }}"
     mode: "0644"
+  loop:
+    - user-data.yml
+    - meta-data.yml
+    - network-config.yml
+  register: _cloudinit_files
 
-- name: Subir o alvo Linux
-  community.docker.docker_compose_v2:
-    project_src: "{{ linux_target_dir }}"
-    state: present
-  become: true
+- name: Verificar se a ISO cidata já existe
+  ansible.builtin.stat:
+    path: "{{ linux_target_storage_dir }}/{{ linux_target_name }}-cidata.iso"
+  register: _linux_target_cidata_iso
+
+- name: Criar a ISO cidata do cloud-init
+  ansible.builtin.command:
+    cmd: >-
+      xorriso -as mkisofs -o {{ linux_target_storage_dir }}/{{ linux_target_name }}-cidata.iso
+      -V cidata -J -R -graft-points
+      user-data={{ linux_target_storage_dir }}/{{ linux_target_name }}-user-data.yml
+      meta-data={{ linux_target_storage_dir }}/{{ linux_target_name }}-meta-data.yml
+      network-config={{ linux_target_storage_dir }}/{{ linux_target_name }}-network-config.yml
+  when: _cloudinit_files is changed or _linux_target_cidata_iso.stat is not defined or not _linux_target_cidata_iso.stat.exists
+
+- name: Verificar se o domínio libvirt do linux-target já existe
+  ansible.builtin.command:
+    cmd: virsh --connect qemu:///system dominfo {{ linux_target_name }}
+  register: _linux_target_domain_check
+  changed_when: false
+  failed_when: false
+
+- name: Criar e iniciar a VM linux-target (cloud-init, sem instalação manual)
+  ansible.builtin.command:
+    cmd: >-
+      virt-install --connect qemu:///system
+      --name {{ linux_target_name }}
+      --memory {{ linux_target_memory_mb }} --vcpus {{ linux_target_vcpus }}
+      --osinfo name=debian12
+      --import
+      --disk path={{ linux_target_storage_dir }}/{{ linux_target_name }}.qcow2,bus=virtio
+      --disk path={{ linux_target_storage_dir }}/{{ linux_target_name }}-cidata.iso,device=cdrom,bus=sata
+      --network bridge={{ linux_target_bridge }},model=virtio
+      --graphics vnc,listen=127.0.0.1,port={{ linux_target_vnc_port }}
+      --noautoconsole
+  when: _linux_target_domain_check.rc != 0
+
+- name: Garantir que a VM sobe sozinha com o host (autostart no libvirt)
+  community.libvirt.virt:
+    name: "{{ linux_target_name }}"
+    autostart: true
