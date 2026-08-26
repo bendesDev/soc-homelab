@@ -1,0 +1,60 @@
+---
+# Invoke-AtomicRedTeam (Red Canary) — framework oficial que executa as
+# técnicas do MITRE ATT&CK localmente na máquina, gerando a telemetria
+# real que o Sysmon captura e o Wazuh detecta.
+
+- name: Habilitar TLS 1.2 e confiar no PSGallery (senão o Install-Module trava esperando confirmação)
+  ansible.windows.win_shell: |
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+  args:
+    executable: powershell
+  changed_when: true
+
+- name: Verificar se o powershell-yaml já está instalado
+  ansible.windows.win_shell: |
+    if (Get-Module -ListAvailable -Name powershell-yaml) { "present" } else { "absent" }
+  args:
+    executable: powershell
+  register: _psyaml_check
+  changed_when: false
+
+- name: Instalar o módulo powershell-yaml (dependência do Invoke-AtomicRedTeam)
+  ansible.windows.win_shell: |
+    Install-Module -Name powershell-yaml -Force -Confirm:$false -Scope AllUsers
+  args:
+    executable: powershell
+  when: "'absent' in _psyaml_check.stdout"
+
+- name: Verificar se o Atomic Red Team já está instalado
+  ansible.windows.win_stat:
+    path: 'C:\AtomicRedTeam\atomics'
+  register: _art_installed
+
+- name: Instalar o Invoke-AtomicRedTeam + biblioteca de atomics
+  ansible.windows.win_shell: |
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    IEX (IWR 'https://raw.githubusercontent.com/redcanaryco/invoke-atomicredteam/master/install-atomicredteam.ps1' -UseBasicParsing)
+    Install-AtomicRedTeam -getAtomics -Force
+  args:
+    executable: powershell
+  when: not _art_installed.stat.exists
+  register: _art_install_result
+  failed_when: "'Installation Complete' not in _art_install_result.stdout and _art_install_result.rc != 0"
+
+- name: Confirmar que os atomics realmente ficaram no disco
+  ansible.windows.win_stat:
+    path: 'C:\AtomicRedTeam\atomics'
+  register: _art_installed_check
+
+- name: Falhar alto se a instalação não deixou nada em disco
+  ansible.builtin.assert:
+    that: _art_installed_check.stat.exists
+    fail_msg: "Instalação do Atomic Red Team rodou mas C:\\AtomicRedTeam\\atomics não existe — confira o log."
+
+- name: Garantir que o módulo carrega no perfil do PowerShell
+  community.windows.win_lineinfile:
+    path: 'C:\Users\gabriel\Documents\WindowsPowerShell\profile.ps1'
+    line: 'Import-Module "C:\AtomicRedTeam\invoke-atomicredteam\Invoke-AtomicRedTeam.psd1" -Force'
+    create: true

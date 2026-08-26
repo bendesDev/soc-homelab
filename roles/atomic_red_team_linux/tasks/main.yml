@@ -1,0 +1,44 @@
+---
+# Mesmo framework que no Windows (Invoke-AtomicRedTeam é multiplataforma
+# via PowerShell Core) — cobre bem menos técnicas no Linux, mas é o
+# mesmo jeito de rodar/observar.
+
+- name: Verificar se o PowerShell já está instalado
+  ansible.builtin.command: pwsh --version
+  register: _pwsh_check
+  changed_when: false
+  failed_when: false
+
+- name: Instalar o PowerShell (repositório oficial da Microsoft)
+  when: _pwsh_check.rc != 0
+  become: true
+  block:
+    - name: Baixar o pacote de configuração do repositório da Microsoft
+      ansible.builtin.get_url:
+        url: https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb
+        dest: /tmp/packages-microsoft-prod.deb
+
+    - name: Registrar o repositório da Microsoft
+      ansible.builtin.apt:
+        deb: /tmp/packages-microsoft-prod.deb
+
+    - name: Instalar o pacote powershell
+      ansible.builtin.apt:
+        name: powershell
+        state: present
+        update_cache: true
+
+- name: Verificar se o Atomic Red Team já está instalado
+  ansible.builtin.stat:
+    path: /home/gabriel/AtomicRedTeam/atomics
+  register: _art_installed
+
+- name: Instalar o Invoke-AtomicRedTeam + biblioteca de atomics
+  ansible.builtin.shell: >-
+    pwsh -Command "IEX (IWR
+    'https://raw.githubusercontent.com/redcanaryco/invoke-atomicredteam/master/install-atomicredteam.ps1'
+    -UseBasicParsing);
+    Install-AtomicRedTeam -getAtomics -Force"
+  args:
+    chdir: /home/gabriel
+  when: not _art_installed.stat.exists
