@@ -353,3 +353,110 @@ Registro cronológico do que foi feito nesta máquina e por quê.
   qualquer mudança sozinho — import novo, legenda nova, o que for).
   Aplicado nas bibliotecas já existentes e também no `configure.yml` pra
   bibliotecas criadas do zero numa migração futura.
+
+## 2026-08-26
+
+- **Grafana em crash loop, achado e corrigido.** 4474 restarts —
+  `roles/grafana/tasks/main.yml` escrevia `wazuh.yml` (datasource
+  provisionado) com `mode: "0600"`, ilegível pro UID não-root do
+  container. Trocado pra `0644`. Sem isso, todo `ansible-playbook
+  --tags grafana` reintroduzia o loop.
+- **Jellyfin: transcodificação por hardware (VAAPI/Intel QuickSync).**
+  Host tem GPU Intel integrada (CometLake UHD) com `/dev/dri/renderD128`
+  world-accessible (0666) mas o container não tinha o device passado.
+  Adicionado `devices:` no compose (`roles/media/templates/
+  docker-compose.yml.j2`) + config `HardwareAccelerationType: vaapi` e
+  `HardwareDecodingCodecs` incluindo `hevc` via `configure.yml`
+  (`System/Configuration/encoding`, GET-then-compare-then-POST porque
+  esse endpoint não distingue criar/atualizar).
+- **Readarr + Prowlarr conectados; Audiobookshelf instalado.**
+  - Readarr (`lscr.io/linuxserver/readarr`) não publica tag `latest`
+    (projeto beta) — e a tag rolling `develop` veio com o manifest
+    quebrado no registry (Docker Hub marca como "inactive", nem
+    `linux/amd64` resolve). Usando tag versionada fixa
+    `develop-0.4.18.2805-ls157`.
+  - **Achado real, não corrigido:** o cliente de download qBittorrent
+    não consegue ser cadastrado no Readarr — "Authentication failure"
+    mesmo com credencial certa. Isolado testando: login direto de
+    dentro do container do Readarr contra o qBittorrent funciona (204),
+    e o mesmo teste no Sonarr funciona também (200) — só o código do
+    Readarr (herdado, não atualizado desde meados de 2025) não sabe
+    interpretar a resposta 204-sem-corpo que o qBittorrent 5.2.3 passou
+    a mandar (versões antigas do qBittorrent respondiam 200 com corpo
+    "Ok."). Testado tanto na tag `develop` quanto `nightly` — mesmo bug
+    nas duas. Documentado em `configure.yml` com comentário; sem
+    automação até o projeto corrigir isso ou aparecer outra solução.
+  - Pasta raiz `/data/library/books` criada com perfil "eBook" (quality)
+    + "Standard" (metadata) — ids descobertos em runtime por nome, não
+    hardcoded (podem mudar entre instâncias).
+  - Prowlarr → Readarr conectado com `syncCategories` de livros (Books/
+    Mags/EBook/Comics: 7000/7010/7020/7030).
+  - Audiobookshelf (`ghcr.io/advplyr/audiobookshelf`) não é um app
+    Servarr — sem `config.xml`/API key. Usuário root criado via
+    `POST /init` (só funciona uma vez, `GET /status.isInit` vira `true`
+    depois — descoberto testando ao vivo). Biblioteca "Audiobooks"
+    apontando pra `/data/library/audiobooks`.
+
+- **Readarr trocado pelo Chaptarr.** Investigando o bug do qBittorrent
+  documentado acima, achei um problema bem maior: o Readarr foi
+  **oficialmente aposentado** pelo time do Servarr em 2026 — o backend
+  de metadados (`api.bookinfo.club`) morreu de vez, confirmado como
+  NXDOMAIN até em DNS público (8.8.8.8). Ou seja, nem a busca de autor/
+  livro funcionava mais, independente do bug do download client.
+  - Substituído pelo **Chaptarr** (`chaptarr/chaptarr:latest` no Docker
+    Hub — não confundir com o mirror pessoal `robertlordhood/chaptarr`),
+    fork ativo que assumiu o projeto. Junta ebooks e audiobooks numa
+    instância só.
+    - Metadados funcionando de verdade (Goodreads + Hardcover),
+      confirmado buscando "Arthur Conan Doyle" e recebendo overview,
+      links, capas.
+    - qBittorrent como cliente de download funciona de primeira — sem o
+      bug do Readarr. Confirmado cadastrando ao vivo antes de escrever a
+      task no `configure.yml`.
+    - Volumes mudaram: `/ebooks` e `/audiobooks` (pastas separadas,
+      diferente do root folder único do Readarr) + `/downloads` (sem o
+      prefixo `/data` que os outros *arr usam).
+    - Schema da API mudou em relação ao Readarr — achado testando, não
+      só lendo doc: `config/host` ganhou campos OIDC novos que causam
+      500 genérico se o PUT não vier com o objeto inteiro (por isso
+      GET-then-modify-then-PUT em vez de montar o corpo na mão, diferente
+      do padrão usado pro Sonarr/Radarr/Prowlarr); perfis de qualidade/
+      metadata são separados por tipo de mídia; o campo de categoria do
+      qBittorrent virou `audiobookCategory`/`ebookCategory` em vez de um
+      `category` único; e o endpoint de adicionar autor (`POST /author`)
+      exige um campo `path` explícito além do `rootFolderPath`, e
+      `audiobookQualityProfileId`/`ebookQualityProfileId`/
+      `audiobookMetadataProfileId`/`ebookMetadataProfileId` em vez de um
+      único par — sem eles, a mensagem de erro nem mostra o valor
+      inválido ("Invalid Path: '{path}'", literal, parece um bug de
+      template de mensagem no próprio Chaptarr).
+  - Prowlarr não tem uma implementação nativa "Chaptarr" nesta versão —
+    continua cadastrado como aplicação tipo "Readarr" (mesmo contrato de
+    API v1, funciona igual), agora com a categoria 3030 (Audio/
+    Audiobook) somada às de livro.
+  - Removido o workaround "Torrent Blackhole" que tinha sido montado pra
+    contornar o bug do Readarr (pasta `/watch` no qBittorrent, `scan_dirs`
+    configurado) — não é mais necessário com o Chaptarr.
+  - Config antigo do Readarr arquivado em
+    `config/readarr.bak-dead-project` (não apagado, só fora do
+    `docker-compose.yml`) — pode ser removido quando não fizer mais
+    falta.
+  - Request de livro/audiobook agora é pela própria UI do Chaptarr em
+    `http://192.168.0.132:8789` (sem app tipo Jellyseerr pra livros).
+  - **Achado pelo gabriel usando a UI de verdade** (não só testando por
+    API): as duas pastas raiz tinham sido criadas com
+    `defaultQualityProfileId`/`defaultMetadataProfileId` (nomes do
+    Readarr) — o `POST /rootfolder` aceita esses campos com 201 mas
+    **ignora silenciosamente**, e a UI mostrava "Selected root folder
+    '/ebooks' does not have ebook defaults configured" ao tentar
+    adicionar um livro. Só um `PUT /rootfolder/{id}` com os campos
+    corretos (`ebookQualityProfileId`/`ebookMetadataProfileId` pra
+    ebooks, `audiobookQualityProfileId`/`audiobookMetadataProfileId`
+    pra audiobooks) realmente preenche o objeto aninhado `ebook`/
+    `audiobook` que a UI lê. Corrigido nas duas pastas ao vivo e no
+    `configure.yml` (sempre reaplica os PUTs, não só no create — cobre
+    quem já tinha passado por esse bug numa aplicação anterior da
+    role). De brinde, liguei `audiobookWriteAudioBookShelfMetadataJson`
+    e `audiobookWriteAudioBookShelfCover` na pasta de audiobooks — o
+    Chaptarr escreve metadata/capa no formato que o Audiobookshelf lê
+    direto, sem precisar rematch por conta própria.

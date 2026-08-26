@@ -20,3 +20,17 @@
     - { role: windows_vm, tags: windows_vm }
     - { role: linux_target, tags: linux_target }
     - { role: dashboard, tags: dashboard }
+
+- name: Configura as VMs Windows do pentest_lab (via WinRM)
+  hosts: windows_vms
+  become: false
+  roles:
+    - { role: sysmon, tags: sysmon }
+    - { role: atomic_red_team_windows, tags: atomic_red_team }
+
+- name: Configura o alvo Linux do pentest_lab (via SSH)
+  hosts: linux_targets
+  become: false
+  roles:
+    - { role: wazuh_agent_linux, tags: wazuh_agent_linux }
+    - { role: atomic_red_team_linux, tags: atomic_red_team }

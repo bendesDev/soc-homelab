@@ -5,3 +5,4 @@
 # Segredos por role (senhas etc.) — nunca commitar. Ver *.yml.example
 # pro formato esperado.
 roles/*/vars/main.yml
+inventory/group_vars/windows_vms.yml
