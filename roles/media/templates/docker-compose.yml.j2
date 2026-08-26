@@ -10,6 +10,8 @@ services:
     volumes:
       - {{ media_config_dir }}/jellyfin:/config
       - {{ media_data_dir }}/library:/data
+    devices:
+      - {{ jellyfin_render_device }}:{{ jellyfin_render_device }}
     networks:
       - media
 
@@ -120,6 +122,48 @@ services:
       - "{{ jellyseerr_port }}:5055"
     volumes:
       - {{ media_config_dir }}/jellyseerr:/app/config
+    networks:
+      - media
+
+  # Readarr foi oficialmente aposentado pelo time do Servarr em 2026 — o
+  # backend de metadados (api.bookinfo.club) morreu de vez (NXDOMAIN,
+  # confirmado até em DNS público) e não vai ser consertado. Chaptarr é
+  # o fork ativo que assumiu o projeto: junta ebooks E audiobooks numa
+  # instância só, mantém a mesma API v1 (por isso continua registrado no
+  # Prowlarr como "Readarr" — o Prowlarr desta versão ainda não tem uma
+  # implementação nativa "Chaptarr", mas o contrato da API é o mesmo).
+  chaptarr:
+    image: chaptarr/chaptarr:latest
+    container_name: chaptarr
+    restart: unless-stopped
+    environment:
+      - PUID={{ media_puid }}
+      - PGID={{ media_pgid }}
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ chaptarr_port }}:8789"
+    volumes:
+      - {{ media_config_dir }}/chaptarr:/config
+      - {{ media_data_dir }}/downloads:/downloads
+      - {{ media_data_dir }}/library/books:/ebooks
+      - {{ media_data_dir }}/library/audiobooks:/audiobooks
+    networks:
+      - media
+
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    restart: unless-stopped
+    environment:
+      - AUDIOBOOKSHELF_UID={{ media_puid }}
+      - AUDIOBOOKSHELF_GID={{ media_pgid }}
+      - TZ={{ media_timezone }}
+    ports:
+      - "{{ audiobookshelf_port }}:80"
+    volumes:
+      - {{ media_config_dir }}/audiobookshelf/config:/config
+      - {{ media_config_dir }}/audiobookshelf/metadata:/metadata
+      - {{ media_data_dir }}/library/audiobooks:/audiobooks
     networks:
       - media
 

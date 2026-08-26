@@ -23,3 +23,11 @@ prowlarr_port: 9696
 bazarr_port: 6767
 jellyseerr_port: 5055
 flaresolverr_port: 8191
+chaptarr_port: 8789
+audiobookshelf_port: 13378
+
+# Dispositivo de renderização da GPU do host, passado pro Jellyfin fazer
+# transcodificação por hardware (VAAPI) em vez de só CPU. Confirmado que
+# existe em /dev/dri/renderD128 com permissão 0666 (mundo pode ler/
+# escrever), então não precisou mexer em grupo/usuário do container.
+jellyfin_render_device: /dev/dri/renderD128

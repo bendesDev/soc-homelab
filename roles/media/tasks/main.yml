@@ -28,6 +28,9 @@
     - bazarr
     - qbittorrent
     - jellyseerr
+    - chaptarr
+    - audiobookshelf/config
+    - audiobookshelf/metadata
   become: true
 
 - name: Criar diretórios de downloads e biblioteca
@@ -41,6 +44,8 @@
     - downloads
     - library/movies
     - library/tv
+    - library/books
+    - library/audiobooks
   become: true
 
 - name: Escrever docker-compose.yml do stack de mídia

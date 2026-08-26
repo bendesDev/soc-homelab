@@ -15,7 +15,7 @@
   ansible.builtin.wait_for:
     path: "{{ media_config_dir }}/{{ item }}/config.xml"
     timeout: 60
-  loop: [sonarr, radarr, prowlarr]
+  loop: [sonarr, radarr, prowlarr, chaptarr]
 
 - name: Ler a API key gerada por cada app Servarr
   ansible.builtin.shell: |
@@ -25,15 +25,16 @@
     executable: /bin/bash
   changed_when: false
   register: _api_key_reads
-  loop: [sonarr, radarr, prowlarr]
+  loop: [sonarr, radarr, prowlarr, chaptarr]
 
 - name: Guardar API keys em variáveis
   ansible.builtin.set_fact:
     sonarr_api_key: "{{ (_api_key_reads.results | selectattr('item', 'equalto', 'sonarr') | first).stdout }}"
     radarr_api_key: "{{ (_api_key_reads.results | selectattr('item', 'equalto', 'radarr') | first).stdout }}"
     prowlarr_api_key: "{{ (_api_key_reads.results | selectattr('item', 'equalto', 'prowlarr') | first).stdout }}"
+    chaptarr_api_key: "{{ (_api_key_reads.results | selectattr('item', 'equalto', 'chaptarr') | first).stdout }}"
 
-- name: Esperar Sonarr/Radarr/Prowlarr responderem
+- name: Esperar Sonarr/Radarr/Prowlarr/Chaptarr responderem
   ansible.builtin.uri:
     url: "http://localhost:{{ item }}/"
     status_code: [200, 301, 302, 401]
@@ -45,6 +46,7 @@
     - "{{ sonarr_port }}"
     - "{{ radarr_port }}"
     - "{{ prowlarr_port }}"
+    - "{{ chaptarr_port }}"
   loop_control:
     label: "porta {{ item }}"
 
@@ -210,6 +212,196 @@
     status_code: 201
   when: (_download_clients.results[1].json | selectattr('implementation', 'equalto', 'QBittorrent') | list | length) == 0
 
+# --- Chaptarr: autenticação + pastas raiz (ebooks + audiobooks) ---
+# Substituiu o Readarr (ver CHANGELOG.md 2026-08-26): o Readarr foi
+# oficialmente aposentado pelo Servarr em 2026 (backend de metadados
+# api.bookinfo.club morreu — NXDOMAIN até em DNS público, confirmado
+# testando) e, à parte isso, tinha um bug próprio pra cadastrar o
+# qBittorrent como cliente de download (código desatualizado não sabia
+# interpretar a resposta 204-sem-corpo do qBittorrent 5.2.3). Chaptarr é
+# o fork ativo: metadados funcionando (Goodreads/Hardcover) e o cliente
+# de download qBittorrent funciona de primeira — confirmado testando os
+# dois ao vivo antes de escrever isso aqui.
+#
+# Schema da API mudou em relação ao Readarr (achado testando, não só
+# lendo doc): config/host tem campos novos (oidc*) que dão 500 genérico
+# ("Object reference...") se o PUT não vier com o objeto inteiro — por
+# isso GET-then-modify-then-PUT em vez de montar o corpo na mão. E os
+# perfis de qualidade/metadata são separados por tipo de mídia
+# (audiobookQualityProfileId/ebookQualityProfileId etc.), diferente do
+# Readarr que tinha um único par.
+- name: Ler configuração atual de host do Chaptarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/config/host/1"
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    status_code: 200
+  register: _chaptarr_host_config
+
+- name: Configurar autenticação (admin/senha) do Chaptarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/config/host/1"
+    method: PUT
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    body_format: json
+    body: "{{ _chaptarr_host_config.json | combine({
+      'username': 'admin',
+      'password': media_admin_password,
+      'passwordConfirmation': media_admin_password,
+    }) }}"
+    status_code: [200, 202]
+  changed_when: false
+
+- name: Garantir pastas raiz no Chaptarr (ebooks + audiobooks)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/rootfolder"
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    status_code: 200
+  register: _chaptarr_rootfolders
+
+- name: Descobrir os ids dos perfis padrão do Chaptarr (nomes são estáveis, ids não)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/{{ item }}"
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    status_code: 200
+  register: _chaptarr_profiles
+  loop: [qualityprofile, metadataprofile]
+
+- name: Criar pasta raiz de ebooks no Chaptarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/rootfolder"
+    method: POST
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    body_format: json
+    body:
+      name: Ebooks
+      path: /ebooks
+      defaultTags: []
+      isCalibreLibrary: false
+    status_code: 201
+  register: _chaptarr_ebooks_folder_created
+  when: "'/ebooks' not in (_chaptarr_rootfolders.json | map(attribute='path') | list)"
+
+- name: Criar pasta raiz de audiobooks no Chaptarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/rootfolder"
+    method: POST
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    body_format: json
+    body:
+      name: Audiobooks
+      path: /audiobooks
+      defaultTags: []
+      isCalibreLibrary: false
+    status_code: 201
+  register: _chaptarr_audiobooks_folder_created
+  when: "'/audiobooks' not in (_chaptarr_rootfolders.json | map(attribute='path') | list)"
+
+# O POST de criação (acima) ignora silenciosamente os campos de perfil
+# padrão — só o PUT de update é que realmente preenche o objeto
+# aninhado "ebook"/"audiobook" (achado testando: criar com
+# defaultQualityProfileId/defaultMetadataProfileId, do jeito que
+# funcionava no Readarr, dá 201 mas o rootfolder fica sem "ebook
+# defaults configured", erro visto direto na UI do Chaptarr). Por isso
+# sempre reaplica os dois PUTs abaixo (idempotente em efeito, sem guarda
+# — repetir o mesmo PUT não muda nada).
+- name: Reler as pastas raiz (pra pegar os ids das recém-criadas)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/rootfolder"
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    status_code: 200
+  register: _chaptarr_rootfolders
+
+- name: Configurar defaults de ebook na pasta raiz /ebooks
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/rootfolder/{{ (_chaptarr_rootfolders.json | selectattr('path', 'equalto', '/ebooks') | first).id }}"
+    method: PUT
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    body_format: json
+    body:
+      id: "{{ (_chaptarr_rootfolders.json | selectattr('path', 'equalto', '/ebooks') | first).id }}"
+      name: Ebooks
+      path: /ebooks
+      defaultTags: []
+      isCalibreLibrary: false
+      folderType: 0
+      placeEbooksWithAudiobooks: false
+      ebookQualityProfileId: "{{ ((_chaptarr_profiles.results | selectattr('item', 'equalto', 'qualityprofile') | first).json | selectattr('name', 'equalto', 'E-Book') | first).id }}"
+      ebookMetadataProfileId: "{{ ((_chaptarr_profiles.results | selectattr('item', 'equalto', 'metadataprofile') | first).json | selectattr('name', 'equalto', 'Ebook Default') | first).id }}"
+      ebookMonitorNewItems: all
+    status_code: [200, 202]
+  changed_when: false
+
+- name: Configurar defaults de audiobook na pasta raiz /audiobooks
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/rootfolder/{{ (_chaptarr_rootfolders.json | selectattr('path', 'equalto', '/audiobooks') | first).id }}"
+    method: PUT
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    body_format: json
+    body:
+      id: "{{ (_chaptarr_rootfolders.json | selectattr('path', 'equalto', '/audiobooks') | first).id }}"
+      name: Audiobooks
+      path: /audiobooks
+      defaultTags: []
+      isCalibreLibrary: false
+      folderType: 0
+      placeEbooksWithAudiobooks: false
+      audiobookQualityProfileId: "{{ ((_chaptarr_profiles.results | selectattr('item', 'equalto', 'qualityprofile') | first).json | selectattr('name', 'equalto', 'Audiobook') | first).id }}"
+      audiobookMetadataProfileId: "{{ ((_chaptarr_profiles.results | selectattr('item', 'equalto', 'metadataprofile') | first).json | selectattr('name', 'equalto', 'Audiobook Default') | first).id }}"
+      audiobookMonitorNewItems: all
+      # Escreve metadata.json + capa no formato do Audiobookshelf junto
+      # de cada audiobook importado — o ABS lê isso direto, sem precisar
+      # rematch por conta própria (os dois apps compartilham a mesma
+      # pasta no disco, ver CHANGELOG.md 2026-08-26).
+      audiobookWriteAudioBookShelfMetadataJson: true
+      audiobookWriteAudioBookShelfCover: true
+    status_code: [200, 202]
+  changed_when: false
+
+- name: Garantir cliente de download registrado no Chaptarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/downloadclient"
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    status_code: 200
+  register: _chaptarr_download_clients
+
+- name: Cadastrar qBittorrent como cliente de download no Chaptarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ chaptarr_port }}/api/v1/downloadclient"
+    method: POST
+    headers:
+      X-Api-Key: "{{ chaptarr_api_key }}"
+    body_format: json
+    body:
+      enable: true
+      protocol: torrent
+      priority: 1
+      removeCompletedDownloads: true
+      removeFailedDownloads: true
+      name: qBittorrent
+      implementation: QBittorrent
+      implementationName: qBittorrent
+      configContract: QBittorrentSettings
+      fields:
+        - {name: host, value: qbittorrent}
+        - {name: port, value: "{{ qbittorrent_port }}"}
+        - {name: useSsl, value: false}
+        - {name: username, value: admin}
+        - {name: password, value: "{{ media_admin_password }}"}
+        - {name: audiobookCategory, value: chaptarr}
+        - {name: ebookCategory, value: chaptarr}
+    status_code: 201
+  when: (_chaptarr_download_clients.json | selectattr('implementation', 'equalto', 'QBittorrent') | list | length) == 0
+
 # --- Prowlarr: autenticação + conexão com Sonarr/Radarr + FlareSolverr ---
 - name: Configurar autenticação (admin/senha) do Prowlarr
   ansible.builtin.uri:
@@ -310,6 +502,31 @@
         - {name: syncCategories, value: [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060]}
     status_code: 201
   when: "'Radarr' not in (_prowlarr_apps.json | map(attribute='name') | list)"
+
+# Prowlarr (nesta versão) não tem uma implementação nativa "Chaptarr" —
+# só "Readarr" mesmo, e o Chaptarr manteve o mesmo contrato de API v1
+# (é literalmente um fork), então funciona igual. Categoria 3030 é
+# Audio/Audiobook, além das de livro (7000/7010/7020/7030).
+- name: Conectar Prowlarr -> Chaptarr
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prowlarr_port }}/api/v1/applications"
+    method: POST
+    headers:
+      X-Api-Key: "{{ prowlarr_api_key }}"
+    body_format: json
+    body:
+      name: Chaptarr
+      implementation: Readarr
+      implementationName: Readarr
+      configContract: ReadarrSettings
+      syncLevel: fullSync
+      fields:
+        - {name: prowlarrUrl, value: "http://prowlarr:{{ prowlarr_port }}"}
+        - {name: baseUrl, value: "http://chaptarr:{{ chaptarr_port }}"}
+        - {name: apiKey, value: "{{ chaptarr_api_key }}"}
+        - {name: syncCategories, value: [3030, 7000, 7010, 7020, 7030]}
+    status_code: 201
+  when: "'Chaptarr' not in (_prowlarr_apps.json | map(attribute='name') | list)"
 
 - name: Garantir tag "flaresolverr" no Prowlarr
   ansible.builtin.uri:
@@ -585,6 +802,39 @@
     label: "{{ item.Name }}"
   when: not item.LibraryOptions.EnableRealtimeMonitor
   changed_when: false
+
+# Transcodificação por hardware (VAAPI/QuickSync) — o host tem GPU Intel
+# integrada com /dev/dri/renderD128 passado pro container (ver
+# jellyfin_render_device). Sem isso o Jellyfin transcodifica em CPU pura,
+# bem mais pesado pra conteúdo 10-bit HEVC. GET-then-compare-then-POST
+# porque esse endpoint não tem "criar só se não existir" — é sempre um
+# PUT do objeto inteiro de configuração.
+- name: Ler configuração de encoding do Jellyfin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/System/Configuration/encoding"
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    status_code: 200
+  register: _jf_encoding
+
+- name: Habilitar VAAPI no Jellyfin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jellyfin_port }}/System/Configuration/encoding"
+    method: POST
+    headers:
+      X-Emby-Token: "{{ _jf_auth.json.AccessToken }}"
+    body_format: json
+    body: "{{ _jf_encoding.json | combine({
+      'HardwareAccelerationType': 'vaapi',
+      'EnableHardwareEncoding': true,
+      'VaapiDevice': jellyfin_render_device,
+      'HardwareDecodingCodecs': ['h264', 'vc1', 'hevc', 'vp9'],
+    }) }}"
+    status_code: 204
+  when: >-
+    _jf_encoding.json.HardwareAccelerationType != 'vaapi'
+    or _jf_encoding.json.VaapiDevice != jellyfin_render_device
+    or 'hevc' not in _jf_encoding.json.HardwareDecodingCodecs
 
 # --- Sonarr/Radarr -> Jellyfin: atualizar biblioteca sozinho ao importar ---
 # Sem isso, o Jellyfin só descobre arquivo novo num scan manual/agendado
@@ -976,3 +1226,60 @@
       - [settings-opensubtitlescom-password, "{{ bazarr_opensubtitlescom_password }}"]
     status_code: 204
   changed_when: false
+
+# --- Audiobookshelf: usuário root + biblioteca de audiobooks ---
+# Não é um app Servarr — não tem config.xml/API key, e a criação do
+# usuário root é feita por um endpoint próprio (POST /init) que só
+# funciona uma vez (GET /status.isInit vira true depois). Descoberto
+# testando ao vivo contra a própria instância, igual ao resto deste
+# arquivo.
+- name: Esperar o Audiobookshelf responder
+  ansible.builtin.uri:
+    url: "http://localhost:{{ audiobookshelf_port }}/status"
+    status_code: 200
+  register: _abs_status
+  until: _abs_status.status == 200
+  retries: 30
+  delay: 2
+
+- name: Criar o usuário root do Audiobookshelf (só na primeira vez)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ audiobookshelf_port }}/init"
+    method: POST
+    body_format: json
+    body:
+      newRoot: {username: admin, password: "{{ media_admin_password }}"}
+    status_code: 200
+  when: not _abs_status.json.isInit
+
+- name: Logar no Audiobookshelf como admin
+  ansible.builtin.uri:
+    url: "http://localhost:{{ audiobookshelf_port }}/login"
+    method: POST
+    body_format: json
+    body: {username: admin, password: "{{ media_admin_password }}"}
+    status_code: 200
+  register: _abs_login
+
+- name: Garantir a biblioteca "Audiobooks" no Audiobookshelf
+  ansible.builtin.uri:
+    url: "http://localhost:{{ audiobookshelf_port }}/api/libraries"
+    headers:
+      Authorization: "Bearer {{ _abs_login.json.user.accessToken }}"
+    status_code: 200
+  register: _abs_libraries
+
+- name: Criar a biblioteca "Audiobooks" no Audiobookshelf
+  ansible.builtin.uri:
+    url: "http://localhost:{{ audiobookshelf_port }}/api/libraries"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ _abs_login.json.user.accessToken }}"
+    body_format: json
+    body:
+      name: Audiobooks
+      folders: [{fullPath: /audiobooks}]
+      mediaType: book
+      icon: audiobook
+    status_code: 200
+  when: "'Audiobooks' not in (_abs_libraries.json.libraries | map(attribute='name') | list)"
