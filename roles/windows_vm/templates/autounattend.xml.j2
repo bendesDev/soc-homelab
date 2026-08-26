@@ -127,7 +127,13 @@
       <FirstLogonCommands>
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>
-          <CommandLine>netsh advfirewall firewall set rule group="remote desktop" new enable=yes</CommandLine>
+          <!-- Regra própria em vez de "set rule group=remote desktop": o
+               nome desse grupo embutido é localizado, e numa instalação
+               pt-BR o comando não encontra nada pra habilitar (falha
+               silenciosa — o resto do FirstLogonCommands continua
+               normalmente, então passa despercebido: IP/hostname ficam
+               certos, só a porta 3389 continua bloqueada no firewall). -->
+          <CommandLine>netsh advfirewall firewall add rule name="RDP-TCP-In" dir=in action=allow protocol=TCP localport=3389</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>2</Order>
