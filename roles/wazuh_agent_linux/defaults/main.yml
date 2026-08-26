@@ -1,0 +1,3 @@
+---
+wazuh_manager_container: single-node-wazuh.manager-1
+pentest_network_name: pentest_lab

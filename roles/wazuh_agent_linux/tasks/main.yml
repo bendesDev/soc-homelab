@@ -1,0 +1,107 @@
+---
+# Instala o agente Wazuh (repositório oficial) no linux-target e aponta
+# pro manager. "wazuh.manager" (DNS interno do Docker) só resolve pra
+# outros containers Docker — VMs libvirt na bridge não enxergam esse
+# nome, por isso o IP do manager na pentest_network é descoberto na
+# hora e usado diretamente (mesmo problema que os agentes Windows
+# teriam se tivessem usado o nome ao invés do IP).
+- name: Descobrir o IP do manager do Wazuh na pentest_network
+  community.docker.docker_container_info:
+    name: "{{ wazuh_manager_container }}"
+  register: _wazuh_manager_info
+  delegate_to: localhost
+  become: false
+
+- name: Definir fato do IP do manager
+  ansible.builtin.set_fact:
+    wazuh_manager_ip: "{{ _wazuh_manager_info.container.NetworkSettings.Networks[pentest_network_name].IPAddress }}"
+
+- name: Adicionar o repositório APT do Wazuh (com a chave GPG embutida)
+  ansible.builtin.deb822_repository:
+    name: wazuh
+    types: deb
+    uris: https://packages.wazuh.com/4.x/apt/
+    suites: stable
+    components: main
+    signed_by: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+  become: true
+
+- name: Instalar o pacote wazuh-agent
+  ansible.builtin.apt:
+    name: wazuh-agent
+    state: present
+    update_cache: true
+  become: true
+  environment:
+    WAZUH_MANAGER: "{{ wazuh_manager_ip }}"
+    WAZUH_AGENT_GROUP: linux
+
+- name: Garantir que o agente aponta pro IP certo do manager
+  ansible.builtin.replace:
+    path: /var/ossec/etc/ossec.conf
+    regexp: '<address>[^<]*</address>'
+    replace: "<address>{{ wazuh_manager_ip }}</address>"
+  become: true
+  register: _manager_address
+
+- name: Habilitar e iniciar o wazuh-agent
+  ansible.builtin.systemd:
+    name: wazuh-agent
+    enabled: true
+    state: started
+  become: true
+
+- name: Reiniciar o wazuh-agent se o endereço do manager mudou
+  ansible.builtin.systemd:
+    name: wazuh-agent
+    state: restarted
+  become: true
+  when: _manager_address is changed
+
+- name: Garantir que o auditd está rodando (já instalado via cloud-init)
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: true
+    state: started
+  become: true
+
+# auditd sem regra nenhuma praticamente não loga nada — o audit.log
+# fica quase vazio, igual o Sysmon sem config. Ruleset conhecido da
+# comunidade (Neo23x0/auditd), equivalente ao SwiftOnSecurity mas pro
+# auditd: cobre execução de processo, mudanças de usuário/grupo, sudo,
+# módulos de kernel, etc.
+- name: Baixar o ruleset de auditd (Neo23x0/auditd)
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/Neo23x0/auditd/master/audit.rules
+    dest: /etc/audit/rules.d/hardening.rules
+  become: true
+  register: _audit_rules
+
+- name: Recarregar as regras do auditd
+  ansible.builtin.command: augenrules --load
+  become: true
+  when: _audit_rules is changed
+  changed_when: true
+
+- name: Garantir que o agente lê o audit.log no grupo compartilhado "linux" do Wazuh
+  community.docker.docker_container_copy_into:
+    container: "{{ wazuh_manager_container }}"
+    container_path: /var/ossec/etc/shared/linux/agent.conf
+    content: |
+      <agent_config>
+        <localfile>
+          <log_format>audit</log_format>
+          <location>/var/log/audit/audit.log</location>
+        </localfile>
+      </agent_config>
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  register: _audit_shared_config
+
+- name: Reiniciar o wazuh-agent pra puxar a config compartilhada nova
+  ansible.builtin.systemd:
+    name: wazuh-agent
+    state: restarted
+  become: true
+  when: _audit_shared_config is changed
