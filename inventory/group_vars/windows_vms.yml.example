@@ -1,0 +1,12 @@
+---
+# Copiar para windows_vms.yml (gitignored) — mesma senha de
+# roles/windows_vm/vars/main.yml (windows_vm_admin_password).
+ansible_user: gabriel
+ansible_password: "CHANGE_ME"
+ansible_connection: winrm
+ansible_winrm_transport: basic
+ansible_winrm_scheme: https
+ansible_port: 5986
+# Certificado autoassinado (gerado pelo ConfigureRemotingForAnsible.ps1) —
+# sem validação porque é rede local isolada (pentest_lab).
+ansible_winrm_server_cert_validation: ignore

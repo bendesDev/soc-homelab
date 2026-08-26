@@ -1,0 +1,52 @@
+---
+- name: Verificar se o serviço Sysmon64 já existe
+  ansible.windows.win_service_info:
+    name: Sysmon64
+  register: _sysmon_service
+
+- name: Bloco de instalação do Sysmon (só quando o serviço ainda não existe)
+  when: _sysmon_service.exists == false
+  block:
+    - name: Criar diretório temporário de instalação
+      ansible.windows.win_file:
+        path: "{{ sysmon_remote_dir }}"
+        state: directory
+
+    - name: Baixar o Sysmon (Microsoft Sysinternals)
+      ansible.windows.win_get_url:
+        url: "{{ sysmon_download_url }}"
+        dest: "{{ sysmon_remote_dir }}\\Sysmon.zip"
+
+    - name: Extrair o Sysmon
+      community.windows.win_unzip:
+        src: "{{ sysmon_remote_dir }}\\Sysmon.zip"
+        dest: "{{ sysmon_remote_dir }}"
+
+    - name: Baixar a config do SwiftOnSecurity
+      ansible.windows.win_get_url:
+        url: "{{ sysmon_config_url }}"
+        dest: "{{ sysmon_remote_dir }}\\sysmonconfig.xml"
+
+    - name: Instalar o Sysmon com a config
+      # Em Windows não-inglês (pt-BR aqui), a primeira tentativa
+      # costuma falhar (rc=13) no registro do manifesto do log de
+      # eventos: o wevtutil na verdade tem sucesso, mas o Sysmon
+      # interpreta errado a mensagem de sucesso localizada e aborta —
+      # bug conhecido do Sysinternals. A segunda tentativa, logo em
+      # seguida, sempre funciona (o manifesto já ficou registrado da
+      # primeira vez).
+      ansible.windows.win_command: >-
+        {{ sysmon_remote_dir }}\Sysmon64.exe -accepteula -i {{ sysmon_remote_dir }}\sysmonconfig.xml
+      register: _sysmon_install
+      failed_when: false
+
+    - name: Tentar de novo se a primeira instalação falhou
+      ansible.windows.win_command: >-
+        {{ sysmon_remote_dir }}\Sysmon64.exe -accepteula -i {{ sysmon_remote_dir }}\sysmonconfig.xml
+      when: _sysmon_install.rc != 0
+
+- name: Garantir que o serviço Sysmon64 está rodando
+  ansible.windows.win_service:
+    name: Sysmon64
+    state: started
+    start_mode: auto

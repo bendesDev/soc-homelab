@@ -1,0 +1,7 @@
+---
+sysmon_download_url: https://download.sysinternals.com/files/Sysmon.zip
+# Config do SwiftOnSecurity — padrão de facto pra lab de detecção (bem
+# mais completo que o Sysmon sem config nenhuma, que não loga quase
+# nada por padrão). https://github.com/SwiftOnSecurity/sysmon-config
+sysmon_config_url: https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml
+sysmon_remote_dir: 'C:\Windows\Temp\sysmon-install'
